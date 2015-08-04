@@ -4,7 +4,7 @@
 #include "Utilities/AutoPause.h"
 #include "Emu/Memory/Memory.h"
 #include "Emu/System.h"
-#include "ModuleManager.h"
+#include "Modules.h"
 
 #include "lv2/sleep_queue.h"
 #include "lv2/sys_lwmutex.h"
@@ -29,19 +29,25 @@
 #include "lv2/sys_tty.h"
 #include "lv2/sys_vm.h"
 #include "lv2/sys_fs.h"
+#include "lv2/sys_dbg.h"
 
 #include "Emu/SysCalls/Modules/cellGcmSys.h"
 
 #include "SysCalls.h"
 
-void null_func(PPUThread& CPU);
+void null_func(PPUThread& ppu)
+{
+	const u64 code = ppu.GPR[11];
+	LOG_ERROR(HLE, "Unimplemented syscall %lld: %s -> CELL_OK", code, SysCalls::GetFuncName(~code));
+	ppu.GPR[3] = 0;
+}
 
 // UNS = Unused
 // ROOT = Root
 // DBG = Debug
 // PM = Product Mode
 // AuthID = Authentication ID
-const ppu_func_caller sc_table[1024] =
+const ppu_func_caller g_sc_table[1024] =
 {
 	null_func,
 	bind_func(sys_process_getpid),                          //1   (0x001)
@@ -75,7 +81,7 @@ const ppu_func_caller sc_table[1024] =
 	
 	null_func, null_func, null_func, null_func, null_func, null_func, null_func, null_func, null_func, //32-40  UNS
 
-	bind_func(sys_internal_ppu_thread_exit),                //41  (0x029)
+	bind_func(_sys_ppu_thread_exit),                        //41  (0x029)
 	null_func,                                              //42  (0x02A)  UNS
 	bind_func(sys_ppu_thread_yield),                        //43  (0x02B)
 	bind_func(sys_ppu_thread_join),                         //44  (0x02C)
@@ -86,8 +92,8 @@ const ppu_func_caller sc_table[1024] =
 	bind_func(sys_ppu_thread_get_stack_information),        //49  (0x031)
 	null_func,//bind_func(sys_ppu_thread_stop),             //50  (0x032)  ROOT
 	null_func,//bind_func(sys_ppu_thread_restart),          //51  (0x033)  ROOT
-	null_func,//bind_func(sys_ppu_thread_create),           //52  (0x034)  DBG
-	null_func,//bind_func(sys_ppu_thread_start),            //53  (0x035)
+	bind_func(_sys_ppu_thread_create),                       //52  (0x034)  DBG
+	bind_func(sys_ppu_thread_start),                        //53  (0x035)
 	null_func,//bind_func(sys_ppu_...),                     //54  (0x036)  ROOT
 	null_func,//bind_func(sys_ppu_...),                     //55  (0x037)  ROOT
 	bind_func(sys_ppu_thread_rename),                       //56  (0x038)
@@ -118,7 +124,7 @@ const ppu_func_caller sc_table[1024] =
 	bind_func(sys_interrupt_tag_destroy),                   //81  (0x051)
 	bind_func(sys_event_flag_create),                       //82  (0x052)
 	bind_func(sys_event_flag_destroy),                      //83  (0x053)
-	bind_func(sys_interrupt_thread_establish),              //84  (0x054)
+	bind_func(_sys_interrupt_thread_establish),             //84  (0x054)
 	bind_func(sys_event_flag_wait),                         //85  (0x055)
 	bind_func(sys_event_flag_trywait),                      //86  (0x056)
 	bind_func(sys_event_flag_set),                          //87  (0x057)
@@ -182,7 +188,7 @@ const ppu_func_caller sc_table[1024] =
 	bind_func(sys_time_get_current_time),                   //145 (0x091)
 	null_func,//bind_func(sys_time_get_system_time),        //146 (0x092)  ROOT
 	bind_func(sys_time_get_timebase_frequency),             //147 (0x093)
-	null_func,//bind_func(sys_rwlock_trywlock)              //148 (0x094)
+	null_func,//bind_func(_sys_rwlock_trywlock)             //148 (0x094)
 	null_func,                                              //149 (0x095)  UNS
 	bind_func(sys_raw_spu_create_interrupt_tag),            //150 (0x096)
 	bind_func(sys_raw_spu_set_int_mask),                    //151 (0x097)
@@ -422,7 +428,7 @@ const ppu_func_caller sc_table[1024] =
 	null_func,                                              //462 (0x1CE)  UNS
 	null_func,//bind_func(sys_prx_load_module_by_fd)        //463 (0x1CF)
 	null_func,//bind_func(sys_prx_load_module_on_memcontainer_by_fd) //464 (0x1D0)
-	null_func,//bind_func(sys_prx_load_module_list)         //465 (0x1D1)
+	bind_func(sys_prx_load_module_list),         //465 (0x1D1)
 	null_func,//bind_func(sys_prx_load_module_list_on_memcontainer) //466 (0x1D2)
 	null_func,//bind_func(sys_prx_get_ppu_guid)             //467 (0x1D3)
 	null_func,//bind_func(sys_...)                          //468 (0x1D4)  ROOT
@@ -437,14 +443,14 @@ const ppu_func_caller sc_table[1024] =
 	
 	null_func, null_func, null_func,                        //477-479  UNS
 
-	null_func,//bind_func(sys_prx_load_module),             //480 (0x1E0)
-	null_func,//bind_func(sys_prx_start_module),            //481 (0x1E1)
-	null_func,//bind_func(sys_prx_stop_module),             //482 (0x1E2)
-	null_func,//bind_func(sys_prx_unload_module),           //483 (0x1E3)
-	null_func,//bind_func(sys_prx_register_module),         //484 (0x1E4)
+	bind_func(sys_prx_load_module),             //480 (0x1E0)
+	bind_func(sys_prx_start_module),            //481 (0x1E1)
+	bind_func(sys_prx_stop_module),             //482 (0x1E2)
+	bind_func(sys_prx_unload_module),           //483 (0x1E3)
+	bind_func(sys_prx_register_module),         //484 (0x1E4)
 	bind_func(sys_prx_query_module),                        //485 (0x1E5)
 	bind_func(sys_prx_register_library),                    //486 (0x1E6)
-	null_func,//bind_func(sys_prx_unregister_library),      //487 (0x1E7)
+	bind_func(sys_prx_unregister_library),      //487 (0x1E7)
 	bind_func(sys_prx_link_library),                        //488 (0x1E8)
 	bind_func(sys_prx_unlink_library),                      //489 (0x1E9)
 	bind_func(sys_prx_query_library),                       //490 (0x1EA)
@@ -886,37 +892,27 @@ const ppu_func_caller sc_table[1024] =
 	null_func, null_func, null_func, bind_func(cellGcmCallback), //1023  UNS
 };
 
-void null_func(PPUThread& CPU)
-{
-	LOG_ERROR(HLE, "Unimplemented syscall %lld: %s -> CELL_OK", CPU.GPR[11], SysCalls::GetFuncName(CPU.GPR[11]));
-	CPU.GPR[3] = 0;
-	return;
-}
-
 void SysCalls::DoSyscall(PPUThread& CPU, u64 code)
 {
-	auto old_last_syscall = CPU.m_last_syscall;
-	CPU.m_last_syscall = code;
-
 	if (code >= 1024)
 	{
-		throw "Invalid syscall number";
+		throw EXCEPTION("Invalid syscall number (0x%llx)", code);
 	}
-
-	//Auto Pause using simple singleton.
-	Debug::AutoPause::getInstance().TryPause(code);
+	
+	auto last_code = CPU.hle_code;
+	CPU.hle_code = ~code;
 
 	if (Ini.HLELogging.GetValue())
 	{
-		LOG_NOTICE(PPU, "Syscall %d called: %s", code, SysCalls::GetFuncName(code));
+		LOG_NOTICE(PPU, "Syscall %lld called: %s", code, SysCalls::GetFuncName(~code));
 	}
 
-	sc_table[code](CPU);
+	g_sc_table[code](CPU);
 
 	if (Ini.HLELogging.GetValue())
 	{
-		LOG_NOTICE(PPU, "Syscall %d finished: %s -> 0x%llx", code, SysCalls::GetFuncName(code), CPU.GPR[3]);
+		LOG_NOTICE(PPU, "Syscall %lld finished: %s -> 0x%llx", code, SysCalls::GetFuncName(~code), CPU.GPR[3]);
 	}
 
-	CPU.m_last_syscall = old_last_syscall;
+	CPU.hle_code = last_code;
 }

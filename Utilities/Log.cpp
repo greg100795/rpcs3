@@ -5,16 +5,16 @@
 #include <iostream>
 #include <cinttypes>
 #include "Thread.h"
-#include "rFile.h"
+#include "File.h"
 
 using namespace Log;
 
-LogManager *gLogManager = nullptr;
+std::unique_ptr<LogManager> g_log_manager;
 
 u32 LogMessage::size() const
 {
 	//1 byte for NULL terminator
-	return (u32)(sizeof(LogMessage::size_type) + sizeof(LogType) + sizeof(LogSeverity) + sizeof(std::string::value_type) * mText.size() + 1);
+	return (u32)(sizeof(LogMessage::size_type) + sizeof(LogType) + sizeof(Severity) + sizeof(std::string::value_type) * mText.size() + 1);
 }
 
 void LogMessage::serialize(char *output) const
@@ -24,8 +24,8 @@ void LogMessage::serialize(char *output) const
 	output += sizeof(LogMessage::size_type);
 	memcpy(output, &mType, sizeof(LogType));
 	output += sizeof(LogType);
-	memcpy(output, &mServerity, sizeof(LogSeverity));
-	output += sizeof(LogSeverity);
+	memcpy(output, &mServerity, sizeof(Severity));
+	output += sizeof(Severity);
 	memcpy(output, mText.c_str(), mText.size() );
 	output += sizeof(std::string::value_type)*mText.size();
 	*output = '\0';
@@ -38,13 +38,13 @@ LogMessage LogMessage::deserialize(char *input, u32* size_out)
 	input += sizeof(LogMessage::size_type);
 	msg.mType = *(reinterpret_cast<LogType*>(input));
 	input += sizeof(LogType);
-	msg.mServerity = *(reinterpret_cast<LogSeverity*>(input));
-	input += sizeof(LogSeverity);
+	msg.mServerity = *(reinterpret_cast<Severity*>(input));
+	input += sizeof(Severity);
 	if (msgSize > 9000)
 	{
 		int wtf = 6;
 	}
-	msg.mText.append(input, msgSize - 1 - sizeof(LogSeverity) - sizeof(LogType));
+	msg.mText.append(input, msgSize - 1 - sizeof(Severity) - sizeof(LogType));
 	if (size_out){(*size_out) = msgSize;}
 	return msg;
 }
@@ -57,7 +57,7 @@ LogChannel::LogChannel() : LogChannel("unknown")
 LogChannel::LogChannel(const std::string& name) :
 	  name(name)
 	, mEnabled(true)
-	, mLogLevel(Warning)
+	, mLogLevel(Severity::Warning)
 {}
 
 void LogChannel::log(const LogMessage &msg)
@@ -82,7 +82,7 @@ void LogChannel::removeListener(std::shared_ptr<LogListener> listener)
 
 struct CoutListener : LogListener
 {
-	void log(const LogMessage &msg)
+	void log(const LogMessage &msg) override
 	{
 		std::cerr << msg.mText << std::endl;
 	}
@@ -90,20 +90,20 @@ struct CoutListener : LogListener
 
 struct FileListener : LogListener
 {
-	rFile mFile;
+	fs::file mFile;
 	bool mPrependChannelName;
 
 	FileListener(const std::string& name = _PRGNAME_, bool prependChannel = true)
-		: mFile(std::string(rPlatform::getConfigDir() + name + ".log").c_str(), rFile::write),
-		mPrependChannelName(prependChannel)
+		: mFile(rPlatform::getConfigDir() + name + ".log", o_write | o_create | o_trunc)
+		, mPrependChannelName(prependChannel)
 	{
-		if (!mFile.IsOpened())
+		if (!mFile)
 		{
 			rMessageBox("Can't create log file! (" + name + ".log)", "Error", rICON_ERROR);
 		}
 	}
 
-	void log(const LogMessage &msg)
+	void log(const LogMessage &msg) override
 	{
 		std::string text = msg.mText;
 		if (mPrependChannelName)
@@ -119,7 +119,8 @@ struct FileListener : LogListener
 				}
 			}
 		}
-		mFile.Write(text);
+
+		mFile.write(text.c_str(), text.size());
 	}
 };
 
@@ -185,22 +186,22 @@ void LogManager::log(LogMessage msg)
 		std::string prefix;
 		switch (msg.mServerity)
 		{
-		case Success:
+		case Severity::Success:
 			prefix = "S ";
 			break;
-		case Notice:
+		case Severity::Notice:
 			prefix = "! ";
 			break;
-		case Warning:
+		case Severity::Warning:
 			prefix = "W ";
 			break;
-		case Error:
+		case Severity::Error:
 			prefix = "E ";
 			break;
 		}
-		if (NamedThreadBase* thr = GetCurrentNamedThread())
+		if (auto thr = get_current_thread_ctrl())
 		{
-			prefix += "{" + thr->GetThreadName() + "} ";
+			prefix += "{" + thr->get_name() + "} ";
 		}
 		msg.mText.insert(0, prefix);
 		msg.mText.append(1,'\n');
@@ -223,6 +224,7 @@ void LogManager::addListener(std::shared_ptr<LogListener> listener)
 		channel.addListener(listener);
 	}
 }
+
 void LogManager::removeListener(std::shared_ptr<LogListener> listener)
 {
 	for (auto& channel : mChannels)
@@ -233,27 +235,42 @@ void LogManager::removeListener(std::shared_ptr<LogListener> listener)
 
 LogManager& LogManager::getInstance()
 {
-	if (!gLogManager)
+	if (!g_log_manager)
 	{
-		gLogManager = new LogManager();
+		g_log_manager.reset(new LogManager());
 	}
-	return *gLogManager;
+
+	return *g_log_manager;
 }
+
 LogChannel &LogManager::getChannel(LogType type)
 {
 	return mChannels[static_cast<u32>(type)];
 }
 
-void log_message(Log::LogType type, Log::LogSeverity sev, const char* text)
+void log_message(Log::LogType type, Log::Severity sev, const char* text)
 {
 	log_message(type, sev, std::string(text));
 }
 
-void log_message(Log::LogType type, Log::LogSeverity sev, std::string text)
+void log_message(Log::LogType type, Log::Severity sev, std::string text)
 {
-	//another msvc bug makes this not work, uncomment this and delete everything else in this function when it's fixed
-	//Log::LogManager::getInstance().log({logType, severity, text})
-
-	Log::LogMessage msg{ type, sev, std::move(text) };
-	Log::LogManager::getInstance().log(msg);
+	if (g_log_manager)
+	{
+		// another msvc bug makes this not work, uncomment this when it's fixed
+		//g_log_manager->log({logType, severity, text});
+		Log::LogMessage msg{ type, sev, std::move(text) };
+		g_log_manager->log(msg);
+	}
+	else
+	{
+		rMessageBox(text,
+			sev == Severity::Notice ? "Notice" :
+			sev == Severity::Warning ? "Warning" :
+			sev == Severity::Success ? "Success" :
+			sev == Severity::Error ? "Error" : "Unknown",
+			sev == Severity::Notice ? rICON_INFORMATION :
+			sev == Severity::Warning ? rICON_EXCLAMATION :
+			sev == Severity::Error ? rICON_ERROR : rICON_INFORMATION);
+	}
 }

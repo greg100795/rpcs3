@@ -1,11 +1,5 @@
 #pragma once
 
-#include <utility>
-#include "Utilities/simpleini/SimpleIni.h"
-
-//TODO: make thread safe/remove static singleton
-CSimpleIniCaseA *getIniFile();
-
 //TODO: move this to the gui module
 struct WindowInfo
 {
@@ -26,7 +20,7 @@ public:
 	virtual ~Ini();
 
 protected:
-	CSimpleIniCaseA *m_Config;
+	void* m_config;
 
 	Ini();
 
@@ -99,6 +93,8 @@ public:
 	// Core
 	IniEntry<u8> CPUDecoderMode;
 	IniEntry<u8> SPUDecoderMode;
+	IniEntry<bool> HookStFunc;
+	IniEntry<bool> LoadLibLv2;
 
 	// Graphics
 	IniEntry<u8> GSRenderMode;
@@ -152,18 +148,19 @@ public:
 
 	// HLE/Miscs
 	IniEntry<u8>   HLELogLvl;
+	IniEntry<u8>   NETStatus;
+	IniEntry<u8>   NETInterface;
 	IniEntry<bool> HLELogging;
 	IniEntry<bool> RSXLogging;
-	IniEntry<bool> HLEHookStFunc;
 	IniEntry<bool> HLESaveTTY;
 	IniEntry<bool> HLEExitOnStop;
 	IniEntry<bool> HLEAlwaysStart;
 
-	//Auto Pause
+	// Auto Pause
 	IniEntry<bool> DBGAutoPauseSystemCall;
 	IniEntry<bool> DBGAutoPauseFunctionCall;
 
-	//Customed EmulationDir
+	// Custom EmulationDir
 	IniEntry<std::string> SysEmulationDirPath;
 	IniEntry<bool> SysEmulationDirPathEnable;
 
@@ -178,8 +175,10 @@ public:
 		path = DefPath;
 
 		// Core
-		CPUDecoderMode.Init("CPU_DecoderMode", path);
-		SPUDecoderMode.Init("CPU_SPUDecoderMode", path);
+		CPUDecoderMode.Init("CORE_DecoderMode", path);
+		SPUDecoderMode.Init("CORE_SPUDecoderMode", path);
+		HookStFunc.Init("CORE_HookStFunc", path);
+		LoadLibLv2.Init("CORE_LoadLibLv2", path);
 
 		// Graphics
 		GSRenderMode.Init("GS_RenderMode", path);
@@ -231,10 +230,11 @@ public:
 		PadHandlerRStickRight.Init("ControlSetings_PadHandlerRStickRight", path);
 		PadHandlerRStickUp.Init("ControlSetings_PadHandlerRStickUp", path);
 
-		// HLE/Misc
+		// Miscellaneous
 		HLELogging.Init("HLE_HLELogging", path);
 		RSXLogging.Init("RSX_Logging", path);
-		HLEHookStFunc.Init("HLE_HLEHookStFunc", path);
+		NETStatus.Init("NET_Status", path);
+		NETInterface.Init("NET_Interface", path);
 		HLESaveTTY.Init("HLE_HLESaveTTY", path);
 		HLEExitOnStop.Init("HLE_HLEExitOnStop", path);
 		HLELogLvl.Init("HLE_HLELogLvl", path);
@@ -257,6 +257,8 @@ public:
 		// Core
 		CPUDecoderMode.Load(0);
 		SPUDecoderMode.Load(0);
+		HookStFunc.Load(false);
+		LoadLibLv2.Load(false);
 
 		// Graphics
 		GSRenderMode.Load(1);
@@ -308,10 +310,11 @@ public:
 		PadHandlerRStickRight.Load(312); //WXK_END
 		PadHandlerRStickUp.Load(366); //WXK_PAGEUP
 
-		// HLE/Miscs
+		// Miscellaneous
 		HLELogging.Load(false);
 		RSXLogging.Load(false);
-		HLEHookStFunc.Load(false);
+		NETStatus.Load(0);
+		NETInterface.Load(0);
 		HLESaveTTY.Load(false);
 		HLEExitOnStop.Load(false);
 		HLELogLvl.Load(3);
@@ -331,9 +334,11 @@ public:
 
 	void Save()
 	{
-		// CPU/SPU
+		// Core
 		CPUDecoderMode.Save();
 		SPUDecoderMode.Save();
+		HookStFunc.Save();
+		LoadLibLv2.Save();
 
 		// Graphics
 		GSRenderMode.Save();
@@ -385,10 +390,11 @@ public:
 		PadHandlerRStickRight.Save();
 		PadHandlerRStickUp.Save();
 
-		// HLE/Miscs
+		// Miscellaneous
 		HLELogging.Save();
 		RSXLogging.Save();
-		HLEHookStFunc.Save();
+		NETStatus.Save();
+		NETInterface.Save();
 		HLESaveTTY.Save();
 		HLEExitOnStop.Save();
 		HLELogLvl.Save();

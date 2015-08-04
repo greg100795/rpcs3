@@ -1,7 +1,7 @@
 #include "stdafx.h"
 #include "rpcs3/Ini.h"
 #include "Utilities/rPlatform.h" // only for rImage
-#include "Utilities/rFile.h"
+#include "Utilities/File.h"
 #include "Utilities/Log.h"
 #include "Emu/Memory/Memory.h"
 #include "Emu/System.h"
@@ -67,7 +67,7 @@ int GLTexture::GetGlWrap(int wrap)
 	case CELL_GCM_TEXTURE_MIRROR: return GL_MIRRORED_REPEAT;
 	case CELL_GCM_TEXTURE_CLAMP_TO_EDGE: return GL_CLAMP_TO_EDGE;
 	case CELL_GCM_TEXTURE_BORDER: return GL_CLAMP_TO_BORDER;
-	case CELL_GCM_TEXTURE_CLAMP: return GL_CLAMP_TO_EDGE;
+	case CELL_GCM_TEXTURE_CLAMP: return GL_CLAMP;
 	case CELL_GCM_TEXTURE_MIRROR_ONCE_CLAMP_TO_EDGE: return GL_MIRROR_CLAMP_TO_EDGE_EXT;
 	case CELL_GCM_TEXTURE_MIRROR_ONCE_BORDER: return GL_MIRROR_CLAMP_TO_BORDER_EXT;
 	case CELL_GCM_TEXTURE_MIRROR_ONCE_CLAMP: return GL_MIRROR_CLAMP_EXT;
@@ -580,10 +580,8 @@ void GLTexture::Save(RSXTexture& tex, const std::string& name)
 		return;
 	}
 
-	{
-		rFile f(name + ".raw", rFile::write);
-		f.Write(alldata, texPixelCount * 4);
-	}
+	fs::file(name + ".raw", o_write | o_create | o_trunc).write(alldata, texPixelCount * 4);
+
 	u8* data = new u8[texPixelCount * 3];
 	u8* alpha = new u8[texPixelCount];
 
@@ -612,10 +610,10 @@ void GLTexture::Save(RSXTexture& tex)
 	static const std::string& dir_path = "textures";
 	static const std::string& file_fmt = dir_path + "/" + "tex[%d].png";
 
-	if (!rExists(dir_path)) rMkdir(dir_path);
+	if (!fs::exists(dir_path)) fs::create_dir(dir_path);
 
 	u32 count = 0;
-	while (rExists(fmt::Format(file_fmt.c_str(), count))) count++;
+	while (fs::exists(fmt::Format(file_fmt.c_str(), count))) count++;
 	Save(tex, fmt::Format(file_fmt.c_str(), count));
 }
 
@@ -796,6 +794,11 @@ GLGSRender::GLGSRender()
 
 GLGSRender::~GLGSRender()
 {
+	if (joinable())
+	{
+		throw EXCEPTION("Thread not joined");
+	}
+
 	m_frame->Close();
 	m_frame->DeleteContext(m_context);
 }
@@ -816,7 +819,10 @@ extern CellGcmContextData current_context;
 
 void GLGSRender::Close()
 {
-	Stop();
+	if (joinable())
+	{
+		join();
+	}
 
 	if (m_frame->IsShown())
 	{
@@ -1091,6 +1097,28 @@ void GLGSRender::InitFragmentData()
 		return;
 	}
 
+	// Get constant from fragment program
+	const std::vector<size_t> &fragmentOffset = m_prog_buffer.getFragmentConstantOffsetsCache(m_cur_fragment_prog);
+	for (size_t offsetInFP : fragmentOffset)
+	{
+		auto data = vm::ptr<u32>::make(m_cur_fragment_prog->addr + (u32)offsetInFP);
+
+		u32 c0 = (data[0] >> 16 | data[0] << 16);
+		u32 c1 = (data[1] >> 16 | data[1] << 16);
+		u32 c2 = (data[2] >> 16 | data[2] << 16);
+		u32 c3 = (data[3] >> 16 | data[3] << 16);
+		const std::string name = fmt::Format("fc%u", offsetInFP);
+		const int l = m_program.GetLocation(name);
+		checkForGlError("glGetUniformLocation " + name);
+
+		float f0 = (float&)c0;
+		float f1 = (float&)c1;
+		float f2 = (float&)c2;
+		float f3 = (float&)c3;
+		glUniform4f(l, f0, f1, f2, f3);
+		checkForGlError("glUniform4f " + name + fmt::Format(" %u [%f %f %f %f]", l, f0, f1, f2, f3));
+	}
+
 	for (const RSXTransformConstant& c : m_fragment_constants)
 	{
 		u32 id = c.id - m_cur_fragment_prog->offset;
@@ -1104,6 +1132,7 @@ void GLGSRender::InitFragmentData()
 		glUniform4f(l, c.x, c.y, c.z, c.w);
 		checkForGlError("glUniform4f " + name + fmt::Format(" %u [%f %f %f %f]", l, c.x, c.y, c.z, c.w));
 	}
+
 
 	//if (m_fragment_constants.GetCount())
 	//	LOG_NOTICE(HLE, "");
@@ -1125,90 +1154,9 @@ bool GLGSRender::LoadProgram()
 		return false;
 	}
 
-	m_fp_buf_num = m_prog_buffer.SearchFp(*m_cur_fragment_prog, m_fragment_prog);
-	m_vp_buf_num = m_prog_buffer.SearchVp(*m_cur_vertex_prog, m_vertex_prog);
-
-	if (m_fp_buf_num == -1)
-	{
-		LOG_WARNING(RSX, "FP not found in buffer!");
-		m_fragment_prog.Decompile(*m_cur_fragment_prog);
-		m_fragment_prog.Compile();
-		checkForGlError("m_fragment_prog.Compile");
-
-		// TODO: This shouldn't use current dir
-		rFile f("./FragmentProgram.txt", rFile::write);
-		f.Write(m_fragment_prog.shader);
-	}
-
-	if (m_vp_buf_num == -1)
-	{
-		LOG_WARNING(RSX, "VP not found in buffer!");
-		m_vertex_prog.Decompile(*m_cur_vertex_prog);
-		m_vertex_prog.Compile();
-		checkForGlError("m_vertex_prog.Compile");
-
-		// TODO: This shouldn't use current dir
-		rFile f("./VertexProgram.txt", rFile::write);
-		f.Write(m_vertex_prog.shader);
-	}
-
-	if (m_fp_buf_num != -1 && m_vp_buf_num != -1)
-	{
-		m_program.id = m_prog_buffer.GetProg(m_fp_buf_num, m_vp_buf_num);
-	}
-
-	if (m_program.id)
-	{
-		// RSX Debugger: Check if this program was modified and update it
-		if (Ini.GSLogPrograms.GetValue())
-		{
-			for (auto& program : m_debug_programs)
-			{
-				if (program.id == m_program.id && program.modified)
-				{
-					// TODO: This isn't working perfectly. Is there any better/shorter way to update the program
-					m_vertex_prog.shader = program.vp_shader;
-					m_fragment_prog.shader = program.fp_shader;
-					m_vertex_prog.Wait();
-					m_vertex_prog.Compile();
-					checkForGlError("m_vertex_prog.Compile");
-					m_fragment_prog.Wait();
-					m_fragment_prog.Compile();
-					checkForGlError("m_fragment_prog.Compile");
-					glAttachShader(m_program.id, m_vertex_prog.id);
-					glAttachShader(m_program.id, m_fragment_prog.id);
-					glLinkProgram(m_program.id);
-					checkForGlError("glLinkProgram");
-					glDetachShader(m_program.id, m_vertex_prog.id);
-					glDetachShader(m_program.id, m_fragment_prog.id);
-					program.vp_id = m_vertex_prog.id;
-					program.fp_id = m_fragment_prog.id;
-					program.modified = false;
-				}
-			}
-		}
-		m_program.Use();
-	}
-	else
-	{
-		m_program.Create(m_vertex_prog.id, m_fragment_prog.id);
-		checkForGlError("m_program.Create");
-		m_prog_buffer.Add(m_program, m_fragment_prog, *m_cur_fragment_prog, m_vertex_prog, *m_cur_vertex_prog);
-		checkForGlError("m_prog_buffer.Add");
-		m_program.Use();
-
-		// RSX Debugger
-		if (Ini.GSLogPrograms.GetValue())
-		{
-			RSXDebuggerProgram program;
-			program.id = m_program.id;
-			program.vp_id = m_vertex_prog.id;
-			program.fp_id = m_fragment_prog.id;
-			program.vp_shader = m_vertex_prog.shader;
-			program.fp_shader = m_fragment_prog.shader;
-			m_debug_programs.push_back(program);
-		}
-	}
+	GLProgram *result = m_prog_buffer.getGraphicPipelineState(m_cur_vertex_prog, m_cur_fragment_prog, nullptr, nullptr);
+	m_program.id = result->id;
+	m_program.Use();
 
 	return true;
 }
@@ -1481,7 +1429,6 @@ void GLGSRender::OnExitThread()
 	m_fbo.Delete();
 	m_vbo.Delete();
 	m_vao.Delete();
-	m_prog_buffer.Clear();
 }
 
 void GLGSRender::OnReset()
@@ -1660,7 +1607,7 @@ void GLGSRender::InitDrawBuffers()
 	}
 }
 
-void GLGSRender::ExecCMD(u32 cmd)
+void GLGSRender::Clear(u32 cmd)
 {
 	assert(cmd == NV4097_CLEAR_SURFACE);
 
@@ -1714,7 +1661,7 @@ void GLGSRender::ExecCMD(u32 cmd)
 	WriteBuffers();
 }
 
-void GLGSRender::ExecCMD()
+void GLGSRender::Draw()
 {
 	//return;
 	if (!LoadProgram())
@@ -2027,9 +1974,9 @@ void GLGSRender::ExecCMD()
 	m_vao.Bind();
 
 	if (m_indexed_array.m_count)
-	{
 		LoadVertexData(m_indexed_array.index_min, m_indexed_array.index_max - m_indexed_array.index_min + 1);
-	}
+	else
+		LoadVertexData(m_draw_array_first, m_draw_array_count);
 
 	if (m_indexed_array.m_count || m_draw_array_count)
 	{
@@ -2201,6 +2148,21 @@ void GLGSRender::Flip()
 		glScissor(m_scissor_x, m_scissor_y, m_scissor_w, m_scissor_h);
 		checkForGlError("glScissor");
 	}
+
+}
+
+void GLGSRender::semaphorePGRAPHTextureReadRelease(u32 offset, u32 value)
+{
+	vm::write32(m_label_addr + offset, value);
+}
+
+void GLGSRender::semaphorePGRAPHBackendRelease(u32 offset, u32 value)
+{
+	vm::write32(m_label_addr + offset, value);
+}
+
+void GLGSRender::semaphorePFIFOAcquire(u32 offset, u32 value)
+{
 
 }
 

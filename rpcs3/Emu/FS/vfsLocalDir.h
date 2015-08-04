@@ -1,12 +1,12 @@
 #pragma once
 #include "vfsDirBase.h"
-#include "Utilities/rFile.h"
+#include "Utilities/File.h"
 
 class vfsLocalDir : public vfsDirBase
 {
 private:
 	u32 m_pos;
-	rDir dir;
+	fs::dir m_dir;
 
 public:
 	vfsLocalDir(vfsDevice* device);
@@ -18,5 +18,5 @@ public:
 	virtual bool Rename(const std::string& from, const std::string& to) override;
 	virtual bool Remove(const std::string& path) override;
 	virtual bool IsOpened() const override;
-	virtual bool IsExists(const std::string& path) const;
+	virtual bool IsExists(const std::string& path) const override;
 };

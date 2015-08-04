@@ -1,9 +1,6 @@
-#include "stdafx.h"
+#pragma once
 
-// Requires GCC 4.10 apparently..
-#ifdef _MSC_VER
-#include <codecvt>
-#endif
+namespace vm { using namespace ps3; }
 
 // L10nResult
 enum

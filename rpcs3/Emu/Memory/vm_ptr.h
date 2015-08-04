@@ -1,456 +1,491 @@
 #pragma once
 
-class CPUThread;
+class PPUThread;
 struct ARMv7Context;
 
 namespace vm
 {
-	template<typename T, int lvl = 1, typename AT = u32>
-	class _ptr_base
+	// helper SFINAE type for vm::_ptr_base comparison operators (enables comparison between equal types and between any type and void*)
+	template<typename T1, typename T2, typename RT = void> using if_comparable_t = std::enable_if_t<
+		std::is_void<T1>::value ||
+		std::is_void<T2>::value ||
+		std::is_same<std::remove_cv_t<T1>, std::remove_cv_t<T2>>::value,
+		RT>;
+
+	// helper SFINAE type for vm::_ptr_base pointer arithmetic operators and indirection (disabled for void and function pointers)
+	template<typename T, typename RT = void> using if_arithmetical_ptr_t = std::enable_if_t<
+		!std::is_void<T>::value &&
+		!std::is_function<T>::value,
+		RT>;
+
+	template<typename T, typename AT = u32>
+	struct _ptr_base
 	{
-		AT m_addr;
+		AT m_addr; // don't access directly
 
-	public:
-		typedef typename std::remove_cv<T>::type type;
-		static const u32 address_size = sizeof(AT);
+		using type = T;
 
-		_ptr_base operator++ (int)
-		{
-			AT result = m_addr;
-			m_addr += address_size;
-			return make(result);
-		}
+		static_assert(!std::is_pointer<T>::value, "vm::_ptr_base<> error: invalid type (pointer)");
+		static_assert(!std::is_reference<T>::value, "vm::_ptr_base<> error: invalid type (reference)");
 
-		_ptr_base& operator++ ()
-		{
-			m_addr += address_size;
-			return *this;
-		}
-
-		_ptr_base operator-- (int)
-		{
-			AT result = m_addr;
-			m_addr -= address_size;
-			return make(result);
-		}
-
-		_ptr_base& operator-- ()
-		{
-			m_addr -= address_size;
-			return *this;
-		}
-
-		_ptr_base& operator += (AT count)
-		{
-			m_addr += count * address_size;
-			return *this;
-		}
-
-		_ptr_base& operator -= (AT count)
-		{
-			m_addr -= count * address_size;
-			return *this;
-		}
-
-		_ptr_base operator + (typename	remove_be_t<AT>::type count) const { return make(m_addr + count * address_size); }
-		_ptr_base operator + (typename		to_be_t<AT>::type count) const { return make(m_addr + count * address_size); }
-		_ptr_base operator - (typename	remove_be_t<AT>::type count) const { return make(m_addr - count * address_size); }
-		_ptr_base operator - (typename		to_be_t<AT>::type count) const { return make(m_addr - count * address_size); }
-
-		__forceinline bool operator <(const _ptr_base& right) const { return m_addr < right.m_addr; }
-		__forceinline bool operator <=(const _ptr_base& right) const { return m_addr <= right.m_addr; }
-		__forceinline bool operator >(const _ptr_base& right) const { return m_addr > right.m_addr; }
-		__forceinline bool operator >=(const _ptr_base& right) const { return m_addr >= right.m_addr; }
-		__forceinline bool operator ==(const _ptr_base& right) const { return m_addr == right.m_addr; }
-		__forceinline bool operator !=(const _ptr_base& right) const { return m_addr != right.m_addr; }
-		__forceinline bool operator ==(const nullptr_t& right) const { return m_addr == 0; }
-		__forceinline bool operator !=(const nullptr_t& right) const { return m_addr != 0; }
-		explicit operator bool() const { return m_addr != 0; }
-
-		__forceinline _ptr_base<T, lvl - 1, std::conditional<is_be_t<T>::value, typename to_be_t<AT>::type, AT>>& operator *() const
-		{
-			return vm::get_ref<_ptr_base<T, lvl - 1, std::conditional<is_be_t<T>::value, typename to_be_t<AT>::type, AT>>>(vm::cast(m_addr));
-		}
-
-		__forceinline _ptr_base<T, lvl - 1, std::conditional<is_be_t<T>::value, typename to_be_t<AT>::type, AT>>& operator [](AT index) const
-		{
-			return vm::get_ref<_ptr_base<T, lvl - 1, std::conditional<is_be_t<T>::value, typename to_be_t<AT>::type, AT>>>(vm::cast(m_addr + sizeof(AT)* index));
-		}
-
-		template<typename AT2>
-		operator _ptr_base<T, lvl, AT2>() const
-		{
-			AT2 addr = convert_le_be<AT2>(m_addr);
-			return reinterpret_cast<_ptr_base<T, lvl, AT2>&>(addr);
-		}
-		
 		AT addr() const
 		{
 			return m_addr;
 		}
 
-		void set(const AT value)
+		// get vm pointer to member
+		template<typename MT, typename T2, typename = if_comparable_t<T, T2>> _ptr_base<MT> of(MT T2::*const member) const
+		{
+			const u32 offset = static_cast<u32>(reinterpret_cast<std::ptrdiff_t>(&(reinterpret_cast<T*>(0ull)->*member)));
+			return{ VM_CAST(m_addr + offset) };
+		}
+
+		// get vm pointer to array member with array subscribtion
+		template<typename MT, typename T2, typename = if_comparable_t<T, T2>> _ptr_base<std::remove_extent_t<MT>> of(MT T2::*const member, u32 index) const
+		{
+			const u32 offset = static_cast<u32>(reinterpret_cast<std::ptrdiff_t>(&(reinterpret_cast<T*>(0ull)->*member)));
+			return{ VM_CAST(m_addr + offset + sizeof32(T) * index) };
+		}
+		
+		template<typename CT> std::enable_if_t<std::is_assignable<AT&, CT>::value> set(const CT& value)
 		{
 			m_addr = value;
 		}
 
-		static _ptr_base make(const AT& addr)
+		template<typename AT2 = AT> static std::enable_if_t<std::is_constructible<AT, AT2>::value, _ptr_base> make(const AT2& addr)
 		{
-			return reinterpret_cast<_ptr_base&>(addr);
-		}
-
-		_ptr_base& operator = (const _ptr_base& right) = default;
-	};
-	
-	template<typename T, typename AT>
-	class _ptr_base<T, 1, AT>
-	{
-		AT m_addr;
-		
-	public:
-		static_assert(!std::is_pointer<T>::value, "vm::_ptr_base<> error: invalid type (pointer)");
-		static_assert(!std::is_reference<T>::value, "vm::_ptr_base<> error: invalid type (reference)");
-		typedef typename std::remove_cv<T>::type type;
-
-		__forceinline static const u32 data_size()
-		{
-			return sizeof(T);
-		}
-
-		__forceinline T* const operator -> () const
-		{
-			return vm::get_ptr<T>(vm::cast(m_addr));
-		}
-
-		_ptr_base operator++ (int)
-		{
-			AT result = m_addr;
-			m_addr += data_size();
-			return make(result);
-		}
-
-		_ptr_base& operator++ ()
-		{
-			m_addr += data_size();
-			return *this;
-		}
-
-		_ptr_base operator-- (int)
-		{
-			AT result = m_addr;
-			m_addr -= data_size();
-			return make(result);
-		}
-
-		_ptr_base& operator-- ()
-		{
-			m_addr -= data_size();
-			return *this;
-		}
-
-		_ptr_base& operator += (AT count)
-		{
-			m_addr += count * data_size();
-			return *this;
-		}
-
-		_ptr_base& operator -= (AT count)
-		{
-			m_addr -= count * data_size();
-			return *this;
-		}
-
-		_ptr_base operator + (typename	remove_be_t<AT>::type count) const { return make(m_addr + count * data_size()); }
-		_ptr_base operator + (typename		to_be_t<AT>::type count) const { return make(m_addr + count * data_size()); }
-		_ptr_base operator - (typename	remove_be_t<AT>::type count) const { return make(m_addr - count * data_size()); }
-		_ptr_base operator - (typename		to_be_t<AT>::type count) const { return make(m_addr - count * data_size()); }
-
-		__forceinline T& operator *() const
-		{
-			return vm::get_ref<T>(vm::cast(m_addr));
-		}
-
-		__forceinline T& operator [](typename remove_be_t<AT>::type index) const
-		{
-			return vm::get_ref<T>(vm::cast(m_addr + data_size() * index));
-		}
-
-		__forceinline T& operator [](typename to_be_t<AT>::forced_type index) const
-		{
-			return vm::get_ref<T>(vm::cast(m_addr + data_size() * index));
-		}
-
-		__forceinline bool operator <(const _ptr_base& right) const { return m_addr < right.m_addr; }
-		__forceinline bool operator <=(const _ptr_base& right) const { return m_addr <= right.m_addr; }
-		__forceinline bool operator >(const _ptr_base& right) const { return m_addr > right.m_addr; }
-		__forceinline bool operator >=(const _ptr_base& right) const { return m_addr >= right.m_addr; }
-		__forceinline bool operator ==(const _ptr_base& right) const { return m_addr == right.m_addr; }
-		__forceinline bool operator !=(const _ptr_base& right) const { return m_addr != right.m_addr; }
-		__forceinline bool operator ==(const nullptr_t& right) const { return m_addr == 0; }
-		__forceinline bool operator !=(const nullptr_t& right) const { return m_addr != 0; }
-		explicit operator bool() const { return m_addr != 0; }
-		explicit operator T*() const { return get_ptr(); }
-		
-		AT addr() const
-		{
-			return m_addr;
-		}
-
-		template<typename U>
-		void set(U&& value)
-		{
-			m_addr = convert_le_be<AT>(value);
-		}
-
-		template<typename AT2>
-		operator _ptr_base<T, 1, AT2>() const
-		{
-			AT2 addr = convert_le_be<AT2>(m_addr);
-			return reinterpret_cast<_ptr_base<T, 1, AT2>&>(addr);
+			const AT value = addr;
+			return{ value };
 		}
 
 		T* get_ptr() const
 		{
-			return vm::get_ptr<T>(vm::cast(m_addr));
+			return vm::get_ptr<T>(VM_CAST(m_addr));
 		}
 
 		T* priv_ptr() const
 		{
-			return vm::priv_ptr<T>(vm::cast(m_addr));
-		}
-		
-		static const _ptr_base make(const AT& addr)
-		{
-			return reinterpret_cast<const _ptr_base&>(addr);
+			return vm::priv_ptr<T>(VM_CAST(m_addr));
 		}
 
-		_ptr_base& operator = (const _ptr_base& right) = default;
-	};
-
-	template<typename AT>
-	class _ptr_base<void, 1, AT>
-	{
-		AT m_addr;
-		
-	public:
-		AT addr() const
-		{
-			return m_addr;
-		}
-
-		void set(const AT value)
-		{
-			m_addr = value;
-		}
-
-		void* get_ptr() const
-		{
-			return vm::get_ptr<void>(vm::cast(m_addr));
-		}
-
-		void* priv_ptr() const
-		{
-			return vm::priv_ptr<void>(vm::cast(m_addr));
-		}
-
-		explicit operator void*() const
+		T* operator ->() const
 		{
 			return get_ptr();
 		}
 
-		__forceinline bool operator <(const _ptr_base& right) const { return m_addr < right.m_addr; }
-		__forceinline bool operator <=(const _ptr_base& right) const { return m_addr <= right.m_addr; }
-		__forceinline bool operator >(const _ptr_base& right) const { return m_addr > right.m_addr; }
-		__forceinline bool operator >=(const _ptr_base& right) const { return m_addr >= right.m_addr; }
-		__forceinline bool operator ==(const _ptr_base& right) const { return m_addr == right.m_addr; }
-		__forceinline bool operator !=(const _ptr_base& right) const { return m_addr != right.m_addr; }
-		__forceinline bool operator ==(const nullptr_t& right) const { return m_addr == 0; }
-		__forceinline bool operator !=(const nullptr_t& right) const { return m_addr != 0; }
-		explicit operator bool() const { return m_addr != 0; }
-
-		template<typename AT2>
-		operator _ptr_base<void, 1, AT2>() const
+		std::add_lvalue_reference_t<T> operator [](u32 index) const
 		{
-			AT2 addr = convert_le_be<AT2>(m_addr);
-			return reinterpret_cast<_ptr_base<void, 1, AT2>&>(addr);
+			static_assert(!std::is_void<T>::value, "vm::_ptr_base<> error: operator[] is not available for void pointers");
+
+			return vm::get_ref<T>(VM_CAST(m_addr + sizeof32(T) * index));
 		}
 
-		template<typename AT2>
-		operator _ptr_base<const void, 1, AT2>() const
+		// enable only the conversions which are originally possible between pointer types
+		template<typename T2, typename AT2, typename = std::enable_if_t<std::is_convertible<T*, T2*>::value>> operator _ptr_base<T2, AT2>() const
 		{
-			AT2 addr = convert_le_be<AT2>(m_addr);
-			return reinterpret_cast<_ptr_base<const void, 1, AT2>&>(addr);
+			return{ VM_CAST(m_addr) };
 		}
 
-		static const _ptr_base make(const AT& addr)
-		{
-			return reinterpret_cast<const _ptr_base&>(addr);
-		}
-
-		_ptr_base& operator = (const _ptr_base& right) = default;
-	};
-
-	template<typename AT>
-	class _ptr_base<const void, 1, AT>
-	{
-		AT m_addr;
-
-	public:
-		AT addr() const
-		{
-			return m_addr;
-		}
-
-		void set(const AT value)
-		{
-			m_addr = value;
-		}
-
-		const void* get_ptr() const
-		{
-			return vm::get_ptr<const void>(vm::cast(m_addr));
-		}
-
-		const void* priv_ptr() const
-		{
-			return vm::priv_ptr<const void>(vm::cast(m_addr));
-		}
-
-		explicit operator const void*() const
+		template<typename T2, typename = std::enable_if_t<std::is_convertible<T*, T2*>::value>> explicit operator T2*() const
 		{
 			return get_ptr();
 		}
 
-		__forceinline bool operator <(const _ptr_base& right) const { return m_addr < right.m_addr; }
-		__forceinline bool operator <=(const _ptr_base& right) const { return m_addr <= right.m_addr; }
-		__forceinline bool operator >(const _ptr_base& right) const { return m_addr > right.m_addr; }
-		__forceinline bool operator >=(const _ptr_base& right) const { return m_addr >= right.m_addr; }
-		__forceinline bool operator ==(const _ptr_base& right) const { return m_addr == right.m_addr; }
-		__forceinline bool operator !=(const _ptr_base& right) const { return m_addr != right.m_addr; }
-		__forceinline bool operator ==(const nullptr_t& right) const { return m_addr == 0; }
-		__forceinline bool operator !=(const nullptr_t& right) const { return m_addr != 0; }
-		explicit operator bool() const { return m_addr != 0; }
-
-		template<typename AT2>
-		operator _ptr_base<const void, 1, AT2>() const
+		explicit operator bool() const
 		{
-			AT2 addr = convert_le_be<AT2>(m_addr);
-			return reinterpret_cast<_ptr_base<const void, 1, AT2>&>(addr);
+			return m_addr != 0;
 		}
 
-		static const _ptr_base make(const AT& addr)
+		// test address alignment using alignof(T)
+		bool aligned() const
 		{
-			return reinterpret_cast<const _ptr_base&>(addr);
+			return m_addr % alignof32(T) == 0;
 		}
 
-		_ptr_base& operator = (const _ptr_base& right) = default;
+		// test address for arbitrary alignment or something
+		force_inline explicit_bool_t operator %(to_ne_t<AT> right) const
+		{
+			return m_addr % right != 0;
+		}
+
+		_ptr_base& operator =(const _ptr_base&) = default;
 	};
 
-	template<typename AT, typename RT, typename ...T>
-	class _ptr_base<RT(T...), 1, AT>
+	template<typename AT, typename RT, typename... T>
+	struct _ptr_base<RT(T...), AT>
 	{
 		AT m_addr;
-
-	public:
-		typedef RT(type)(T...);
-
-		RT operator()(CPUThread& CPU, T... args) const; // defined in CB_FUNC.h, call using specified PPU thread context
-
-		RT operator()(ARMv7Context& context, T... args) const; // defined in ARMv7Callback.h, passing context is mandatory
-
-		RT operator()(T... args) const; // defined in CB_FUNC.h, call using current PPU thread context
 
 		AT addr() const
 		{
 			return m_addr;
 		}
 
-		void set(const AT value)
+		template<typename CT> std::enable_if_t<std::is_assignable<AT&, CT>::value> set(const CT& value)
 		{
 			m_addr = value;
 		}
 
-		__forceinline bool operator <(const _ptr_base& right) const { return m_addr < right.m_addr; }
-		__forceinline bool operator <=(const _ptr_base& right) const { return m_addr <= right.m_addr; }
-		__forceinline bool operator >(const _ptr_base& right) const { return m_addr > right.m_addr; }
-		__forceinline bool operator >=(const _ptr_base& right) const { return m_addr >= right.m_addr; }
-		__forceinline bool operator ==(const _ptr_base& right) const { return m_addr == right.m_addr; }
-		__forceinline bool operator !=(const _ptr_base& right) const { return m_addr != right.m_addr; }
-		__forceinline bool operator ==(const nullptr_t& right) const { return m_addr == 0; }
-		__forceinline bool operator !=(const nullptr_t& right) const { return m_addr != 0; }
-		explicit operator bool() const { return m_addr != 0; }
-
-		template<typename AT2>
-		operator _ptr_base<type, 1, AT2>() const
+		template<typename AT2 = AT> static std::enable_if_t<std::is_constructible<AT, AT2>::value, _ptr_base> make(const AT2& addr)
 		{
-			AT2 addr = convert_le_be<AT2>(m_addr);
-			return reinterpret_cast<_ptr_base<type, 1, AT2>&>(addr);
+			const AT value = addr;
+			return{ value };
 		}
 
-		static const _ptr_base make(const AT& addr)
+		// defined in CB_FUNC.h, passing context is mandatory
+		RT operator()(PPUThread& CPU, T... args) const;
+
+		// defined in ARMv7Callback.h, passing context is mandatory
+		RT operator()(ARMv7Context& context, T... args) const;
+
+		// conversion to another function pointer
+		template<typename AT2> operator _ptr_base<RT(T...), AT2>() const
 		{
-			return reinterpret_cast<const _ptr_base&>(addr);
+			return{ VM_CAST(m_addr) };
 		}
 
-		operator const std::function<type>() const
+		explicit operator bool() const
 		{
-			const AT addr = convert_le_be<AT>(m_addr);
-			return [addr](T... args) -> RT { return make(addr)(args...); };
+			return m_addr != 0;
 		}
 
-		_ptr_base& operator = (const _ptr_base& right) = default;
+		_ptr_base& operator =(const _ptr_base&) = default;
 	};
 
-	template<typename AT, typename RT, typename ...T>
-	class _ptr_base<RT(*)(T...), 1, AT>
+	template<typename AT, typename RT, typename... T>
+	struct _ptr_base<RT(*)(T...), AT>
 	{
 		AT m_addr;
 
-	public:
 		static_assert(!sizeof(AT), "vm::_ptr_base<> error: use RT(T...) format for functions instead of RT(*)(T...)");
 	};
 
-	//BE pointer to LE data
-	template<typename T, int lvl = 1, typename AT = u32> using bptrl = _ptr_base<T, lvl, typename to_be_t<AT>::type>;
+	// Native endianness pointer to LE data
+	template<typename T, typename AT = u32> using ptrl = _ptr_base<to_le_t<T>, AT>;
 
-	//BE pointer to BE data
-	template<typename T, int lvl = 1, typename AT = u32> using bptrb = _ptr_base<typename to_be_t<T>::type, lvl, typename to_be_t<AT>::type>;
+	// Native endianness pointer to BE data
+	template<typename T, typename AT = u32> using ptrb = _ptr_base<to_be_t<T>, AT>;
 
-	//LE pointer to BE data
-	template<typename T, int lvl = 1, typename AT = u32> using lptrb = _ptr_base<typename to_be_t<T>::type, lvl, AT>;
+	// BE pointer to LE data
+	template<typename T, typename AT = u32> using bptrl = _ptr_base<to_le_t<T>, to_be_t<AT>>;
 
-	//LE pointer to LE data
-	template<typename T, int lvl = 1, typename AT = u32> using lptrl = _ptr_base<T, lvl, AT>;
+	// BE pointer to BE data
+	template<typename T, typename AT = u32> using bptrb = _ptr_base<to_be_t<T>, to_be_t<AT>>;
+
+	// LE pointer to LE data
+	template<typename T, typename AT = u32> using lptrl = _ptr_base<to_le_t<T>, to_le_t<AT>>;
+
+	// LE pointer to BE data
+	template<typename T, typename AT = u32> using lptrb = _ptr_base<to_be_t<T>, to_le_t<AT>>;
 
 	namespace ps3
 	{
-		//default pointer for HLE functions (LE pointer to BE data)
-		template<typename T, int lvl = 1, typename AT = u32> using ptr = lptrb<T, lvl, AT>;
+		// default pointer for PS3 HLE functions (Native endianness pointer to BE data)
+		template<typename T, typename AT = u32> using ptr = ptrb<T, AT>;
 
-		//default pointer for HLE structures (BE pointer to BE data)
-		template<typename T, int lvl = 1, typename AT = u32> using bptr = bptrb<T, lvl, AT>;
+		// default pointer to pointer for PS3 HLE functions (Native endianness pointer to BE pointer to BE data)
+		template<typename T, typename AT = u32, typename AT2 = u32> using pptr = ptr<ptr<T, AT2>, AT>;
+
+		// default pointer for PS3 HLE structures (BE pointer to BE data)
+		template<typename T, typename AT = u32> using bptr = bptrb<T, AT>;
+
+		// default pointer to pointer for PS3 HLE structures (BE pointer to BE pointer to BE data)
+		template<typename T, typename AT = u32, typename AT2 = u32> using bpptr = bptr<ptr<T, AT2>, AT>;
+
+		// native endianness pointer to const BE data
+		template<typename T, typename AT = u32> using cptr = ptr<const T, AT>;
+
+		// BE pointer to const BE data
+		template<typename T, typename AT = u32> using bcptr = bptr<const T, AT>;
+
+		template<typename T, typename AT = u32> using cpptr = pptr<const T, AT>;
+		template<typename T, typename AT = u32> using bcpptr = bpptr<const T, AT>;
 	}
 
 	namespace psv
 	{
-		//default pointer for HLE functions & structures (LE pointer to LE data)
-		template<typename T, int lvl = 1, typename AT = u32> using ptr = lptrl<T, lvl, AT>;
+		// default pointer for PSV HLE functions (Native endianness pointer to LE data)
+		template<typename T> using ptr = ptrl<T>;
+
+		// default pointer to pointer for PSV HLE functions (Native endianness pointer to LE pointer to LE data)
+		template<typename T> using pptr = ptr<ptr<T>>;
+
+		// default pointer for PSV HLE structures (LE pointer to LE data)
+		template<typename T> using lptr = lptrl<T>;
+
+		// default pointer to pointer for PSV HLE structures (LE pointer to LE pointer to LE data)
+		template<typename T> using lpptr = lptr<ptr<T>>;
+
+		// native endianness pointer to const LE data
+		template<typename T> using cptr = ptr<const T>;
+
+		// LE pointer to const LE data
+		template<typename T> using lcptr = lptr<const T>;
+
+		template<typename T> using cpptr = pptr<const T>;
+		template<typename T> using lcpptr = lpptr<const T>;
 	}
 
-	//PS3 emulation is main now, so lets it be as default
-	using namespace ps3;
+	struct null_t
+	{
+		template<typename T, typename AT> operator _ptr_base<T, AT>() const
+		{
+			return{};
+		}
+	};
+
+	// vm::null is convertible to any vm::ptr type as null pointer in virtual memory
+	static null_t null;
+
+	// perform static_cast (for example, vm::ptr<void> to vm::ptr<char>)
+	template<typename CT, typename T, typename AT, typename = decltype(static_cast<CT*>(std::declval<T*>()))> inline _ptr_base<CT, AT> static_ptr_cast(const _ptr_base<T, AT>& other)
+	{
+		return{ other.m_addr };
+	}
+
+	// perform const_cast (for example, vm::cptr<char> to vm::ptr<char>)
+	template<typename CT, typename T, typename AT, typename = decltype(const_cast<CT*>(std::declval<T*>()))> inline _ptr_base<CT, AT> const_ptr_cast(const _ptr_base<T, AT>& other)
+	{
+		return{ other.m_addr };
+	}
+
+	// perform reinterpret_cast (for example, vm::ptr<char> to vm::ptr<u32>)
+	template<typename CT, typename T, typename AT, typename = decltype(reinterpret_cast<CT*>(std::declval<T*>()))> inline _ptr_base<CT, AT> reinterpret_ptr_cast(const _ptr_base<T, AT>& other)
+	{
+		return{ other.m_addr };
+	}
 }
+
+// unary plus operator for vm::_ptr_base (always available)
+template<typename T, typename AT> inline vm::_ptr_base<T, AT> operator +(const vm::_ptr_base<T, AT>& ptr)
+{
+	return ptr;
+}
+
+// indirection operator for vm::_ptr_base
+template<typename T, typename AT> inline vm::if_arithmetical_ptr_t<T, T&> operator *(const vm::_ptr_base<T, AT>& ptr)
+{
+	return vm::get_ref<T>(VM_CAST(ptr.m_addr));
+}
+
+// postfix increment operator for vm::_ptr_base
+template<typename T, typename AT> inline vm::if_arithmetical_ptr_t<T, vm::_ptr_base<T, AT>> operator ++(vm::_ptr_base<T, AT>& ptr, int)
+{
+	const AT result = ptr.m_addr;
+	ptr.m_addr += sizeof32(T);
+	return{ result };
+}
+
+// prefix increment operator for vm::_ptr_base
+template<typename T, typename AT> inline vm::if_arithmetical_ptr_t<T, vm::_ptr_base<T, AT>&> operator ++(vm::_ptr_base<T, AT>& ptr)
+{
+	ptr.m_addr += sizeof32(T);
+	return ptr;
+}
+
+// postfix decrement operator for vm::_ptr_base
+template<typename T, typename AT> inline vm::if_arithmetical_ptr_t<T, vm::_ptr_base<T, AT>> operator --(vm::_ptr_base<T, AT>& ptr, int)
+{
+	const AT result = ptr.m_addr;
+	ptr.m_addr -= sizeof32(T);
+	return{ result };
+}
+
+// prefix decrement operator for vm::_ptr_base
+template<typename T, typename AT> inline vm::if_arithmetical_ptr_t<T, vm::_ptr_base<T, AT>&> operator --(vm::_ptr_base<T, AT>& ptr)
+{
+	ptr.m_addr -= sizeof32(T);
+	return ptr;
+}
+
+// addition assignment operator for vm::_ptr_base (pointer += integer)
+template<typename T, typename AT> inline vm::if_arithmetical_ptr_t<T, vm::_ptr_base<T, AT>&> operator +=(vm::_ptr_base<T, AT>& ptr, to_ne_t<AT> count)
+{
+	ptr.m_addr += count * sizeof32(T);
+	return ptr;
+}
+
+// subtraction assignment operator for vm::_ptr_base (pointer -= integer)
+template<typename T, typename AT> inline vm::if_arithmetical_ptr_t<T, vm::_ptr_base<T, AT>&> operator -=(vm::_ptr_base<T, AT>& ptr, to_ne_t<AT> count)
+{
+	ptr.m_addr -= count * sizeof32(T);
+	return ptr;
+}
+
+// addition operator for vm::_ptr_base (pointer + integer)
+template<typename T, typename AT> inline vm::if_arithmetical_ptr_t<T, vm::_ptr_base<T, AT>> operator +(const vm::_ptr_base<T, AT>& ptr, to_ne_t<AT> count)
+{
+	return{ ptr.m_addr + count * sizeof32(T) };
+}
+
+// addition operator for vm::_ptr_base (integer + pointer)
+template<typename T, typename AT> inline vm::if_arithmetical_ptr_t<T, vm::_ptr_base<T, AT>> operator +(to_ne_t<AT> count, const vm::_ptr_base<T, AT>& ptr)
+{
+	return{ ptr.m_addr + count * sizeof32(T) };
+}
+
+// subtraction operator for vm::_ptr_base (pointer - integer)
+template<typename T, typename AT> inline vm::if_arithmetical_ptr_t<T, vm::_ptr_base<T, AT>> operator -(const vm::_ptr_base<T, AT>& ptr, to_ne_t<AT> count)
+{
+	return{ ptr.m_addr - count * sizeof32(T) };
+}
+
+// pointer difference operator for vm::_ptr_base
+template<typename T1, typename AT1, typename T2, typename AT2> inline std::enable_if_t<
+	!std::is_void<T1>::value &&
+	!std::is_void<T2>::value &&
+	!std::is_function<T1>::value &&
+	!std::is_function<T2>::value &&
+	std::is_same<std::remove_cv_t<T1>, std::remove_cv_t<T2>>::value,
+	s32> operator -(const vm::_ptr_base<T1, AT1>& left, const vm::_ptr_base<T2, AT2>& right)
+{
+	return static_cast<s32>(left.m_addr - right.m_addr) / sizeof32(T1);
+}
+
+// comparison operator for vm::_ptr_base (pointer1 == pointer2)
+template<typename T1, typename AT1, typename T2, typename AT2> vm::if_comparable_t<T1, T2, bool> operator ==(const vm::_ptr_base<T1, AT1>& left, const vm::_ptr_base<T2, AT2>& right)
+{
+	return left.m_addr == right.m_addr;
+}
+
+template<typename T, typename AT> bool operator ==(const vm::null_t&, const vm::_ptr_base<T, AT>& ptr)
+{
+	return ptr.m_addr == 0;
+}
+
+template<typename T, typename AT> bool operator ==(const vm::_ptr_base<T, AT>& ptr, const vm::null_t&)
+{
+	return ptr.m_addr == 0;
+}
+
+// comparison operator for vm::_ptr_base (pointer1 != pointer2)
+template<typename T1, typename AT1, typename T2, typename AT2> vm::if_comparable_t<T1, T2, bool> operator !=(const vm::_ptr_base<T1, AT1>& left, const vm::_ptr_base<T2, AT2>& right)
+{
+	return left.m_addr != right.m_addr;
+}
+
+template<typename T, typename AT> bool operator !=(const vm::null_t&, const vm::_ptr_base<T, AT>& ptr)
+{
+	return ptr.m_addr != 0;
+}
+
+template<typename T, typename AT> bool operator !=(const vm::_ptr_base<T, AT>& ptr, const vm::null_t&)
+{
+	return ptr.m_addr != 0;
+}
+
+// comparison operator for vm::_ptr_base (pointer1 < pointer2)
+template<typename T1, typename AT1, typename T2, typename AT2> vm::if_comparable_t<T1, T2, bool> operator <(const vm::_ptr_base<T1, AT1>& left, const vm::_ptr_base<T2, AT2>& right)
+{
+	return left.m_addr < right.m_addr;
+}
+
+template<typename T, typename AT> bool operator <(const vm::null_t&, const vm::_ptr_base<T, AT>& ptr)
+{
+	return ptr.m_addr != 0;
+}
+
+template<typename T, typename AT> bool operator <(const vm::_ptr_base<T, AT>&, const vm::null_t&)
+{
+	return false;
+}
+
+// comparison operator for vm::_ptr_base (pointer1 <= pointer2)
+template<typename T1, typename AT1, typename T2, typename AT2> vm::if_comparable_t<T1, T2, bool> operator <=(const vm::_ptr_base<T1, AT1>& left, const vm::_ptr_base<T2, AT2>& right)
+{
+	return left.m_addr <= right.m_addr;
+}
+
+template<typename T, typename AT> bool operator <=(const vm::null_t&, const vm::_ptr_base<T, AT>&)
+{
+	return true;
+}
+
+template<typename T, typename AT> bool operator <=(const vm::_ptr_base<T, AT>& ptr, const vm::null_t&)
+{
+	return ptr.m_addr == 0;
+}
+
+// comparison operator for vm::_ptr_base (pointer1 > pointer2)
+template<typename T1, typename AT1, typename T2, typename AT2> vm::if_comparable_t<T1, T2, bool> operator >(const vm::_ptr_base<T1, AT1>& left, const vm::_ptr_base<T2, AT2>& right)
+{
+	return left.m_addr > right.m_addr;
+}
+
+template<typename T, typename AT> bool operator >(const vm::null_t&, const vm::_ptr_base<T, AT>&)
+{
+	return false;
+}
+
+template<typename T, typename AT> bool operator >(const vm::_ptr_base<T, AT>& ptr, const vm::null_t&)
+{
+	return ptr.m_addr != 0;
+}
+
+// comparison operator for vm::_ptr_base (pointer1 >= pointer2)
+template<typename T1, typename AT1, typename T2, typename AT2> vm::if_comparable_t<T1, T2, bool> operator >=(const vm::_ptr_base<T1, AT1>& left, const vm::_ptr_base<T2, AT2>& right)
+{
+	return left.m_addr >= right.m_addr;
+}
+
+template<typename T, typename AT> bool operator >=(const vm::null_t&, const vm::_ptr_base<T, AT>& ptr)
+{
+	return ptr.m_addr == 0;
+}
+
+template<typename T, typename AT> bool operator >=(const vm::_ptr_base<T, AT>&, const vm::null_t&)
+{
+	return true;
+}
+
+// external specialization for is_be_t<> (true if AT is be_t<>)
+
+template<typename T, typename AT>
+struct is_be_t<vm::_ptr_base<T, AT>> : public std::integral_constant<bool, is_be_t<AT>::value>
+{
+};
+
+// external specialization for is_le_t<> (true if AT is le_t<>)
+
+template<typename T, typename AT>
+struct is_le_t<vm::_ptr_base<T, AT>> : public std::integral_constant<bool, is_le_t<AT>::value>
+{
+};
+
+// external specialization for to_ne_t<> (change AT endianness to native)
+
+template<typename T, typename AT>
+struct to_ne<vm::_ptr_base<T, AT>>
+{
+	using type = vm::_ptr_base<T, to_ne_t<AT>>;
+};
+
+// external specialization for to_be_t<> (change AT endianness to BE)
+
+template<typename T, typename AT>
+struct to_be<vm::_ptr_base<T, AT>>
+{
+	using type = vm::_ptr_base<T, to_be_t<AT>>;
+};
+
+// external specialization for to_le_t<> (change AT endianness to LE)
+
+template<typename T, typename AT>
+struct to_le<vm::_ptr_base<T, AT>>
+{
+	using type = vm::_ptr_base<T, to_le_t<AT>>;
+};
 
 namespace fmt
 {
 	// external specialization for fmt::format function
 
-	template<typename T, int lvl, typename AT>
-	struct unveil<vm::_ptr_base<T, lvl, AT>, false>
+	template<typename T, typename AT>
+	struct unveil<vm::_ptr_base<T, AT>, false>
 	{
-		typedef typename unveil<AT>::result_type result_type;
+		using result_type = typename unveil<AT>::result_type;
 
-		__forceinline static result_type get_value(const vm::_ptr_base<T, lvl, AT>& arg)
+		force_inline static result_type get_value(const vm::_ptr_base<T, AT>& arg)
 		{
 			return unveil<AT>::get_value(arg.addr());
 		}
@@ -462,17 +497,17 @@ namespace fmt
 template<typename T, bool is_enum>
 struct cast_ppu_gpr;
 
-template<typename T, int lvl, typename AT>
-struct cast_ppu_gpr<vm::_ptr_base<T, lvl, AT>, false>
+template<typename T, typename AT>
+struct cast_ppu_gpr<vm::_ptr_base<T, AT>, false>
 {
-	__forceinline static u64 to_gpr(const vm::_ptr_base<T, lvl, AT>& value)
+	force_inline static u64 to_gpr(const vm::_ptr_base<T, AT>& value)
 	{
 		return cast_ppu_gpr<AT, std::is_enum<AT>::value>::to_gpr(value.addr());
 	}
 
-	__forceinline static vm::_ptr_base<T, lvl, AT> from_gpr(const u64 reg)
+	force_inline static vm::_ptr_base<T, AT> from_gpr(const u64 reg)
 	{
-		return vm::_ptr_base<T, lvl, AT>::make(cast_ppu_gpr<AT, std::is_enum<AT>::value>::from_gpr(reg));
+		return vm::_ptr_base<T, AT>::make(cast_ppu_gpr<AT, std::is_enum<AT>::value>::from_gpr(reg));
 	}
 };
 
@@ -481,16 +516,16 @@ struct cast_ppu_gpr<vm::_ptr_base<T, lvl, AT>, false>
 template<typename T, bool is_enum>
 struct cast_armv7_gpr;
 
-template<typename T, int lvl, typename AT>
-struct cast_armv7_gpr<vm::_ptr_base<T, lvl, AT>, false>
+template<typename T, typename AT>
+struct cast_armv7_gpr<vm::_ptr_base<T, AT>, false>
 {
-	__forceinline static u32 to_gpr(const vm::_ptr_base<T, lvl, AT>& value)
+	force_inline static u32 to_gpr(const vm::_ptr_base<T, AT>& value)
 	{
 		return cast_armv7_gpr<AT, std::is_enum<AT>::value>::to_gpr(value.addr());
 	}
 
-	__forceinline static vm::_ptr_base<T, lvl, AT> from_gpr(const u32 reg)
+	force_inline static vm::_ptr_base<T, AT> from_gpr(const u32 reg)
 	{
-		return vm::_ptr_base<T, lvl, AT>::make(cast_armv7_gpr<AT, std::is_enum<AT>::value>::from_gpr(reg));
+		return vm::_ptr_base<T, AT>::make(cast_armv7_gpr<AT, std::is_enum<AT>::value>::from_gpr(reg));
 	}
 };

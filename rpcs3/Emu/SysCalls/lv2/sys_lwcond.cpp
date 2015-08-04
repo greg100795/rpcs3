@@ -5,251 +5,214 @@
 #include "Emu/SysCalls/SysCalls.h"
 
 #include "Emu/Cell/PPUThread.h"
-#include "Emu/SysCalls/Modules/sysPrxForUser.h"
-#include "sleep_queue.h"
-#include "sys_time.h"
 #include "sys_lwmutex.h"
 #include "sys_lwcond.h"
 
 SysCallBase sys_lwcond("sys_lwcond");
 
-void lwcond_create(sys_lwcond_t& lwcond, sys_lwmutex_t& lwmutex, u64 name)
-{
-	std::shared_ptr<lwcond_t> cond(new lwcond_t(name));
+extern u64 get_system_time();
 
-	lwcond.lwcond_queue = Emu.GetIdManager().GetNewID(cond, TYPE_LWCOND);
+void lv2_lwcond_t::notify(lv2_lock_t & lv2_lock, sleep_queue_t::value_type& thread, const std::shared_ptr<lv2_lwmutex_t>& mutex, bool mode2)
+{
+	CHECK_LV2_LOCK(lv2_lock);
+
+	auto& ppu = static_cast<PPUThread&>(*thread);
+
+	ppu.GPR[3] = mode2;  // set to return CELL_EBUSY
+
+	if (!mode2)
+	{
+		if (!mutex->signaled)
+		{
+			return mutex->sq.emplace_back(thread);
+		}
+
+		mutex->signaled--;
+	}
+
+	if (!ppu.signal())
+	{
+		throw EXCEPTION("Thread already signaled");
+	}
 }
 
 s32 _sys_lwcond_create(vm::ptr<u32> lwcond_id, u32 lwmutex_id, vm::ptr<sys_lwcond_t> control, u64 name, u32 arg5)
 {
-	sys_lwcond.Warning("_sys_lwcond_create(lwcond_id=*0x%x, lwmutex_id=%d, control=*0x%x, name=0x%llx, arg5=0x%x)", lwcond_id, lwmutex_id, control, name, arg5);
+	sys_lwcond.Warning("_sys_lwcond_create(lwcond_id=*0x%x, lwmutex_id=0x%x, control=*0x%x, name=0x%llx, arg5=0x%x)", lwcond_id, lwmutex_id, control, name, arg5);
 
-	std::shared_ptr<lwcond_t> cond(new lwcond_t(name));
-
-	*lwcond_id = Emu.GetIdManager().GetNewID(cond, TYPE_LWCOND);
+	*lwcond_id = Emu.GetIdManager().make<lv2_lwcond_t>(name);
 
 	return CELL_OK;
 }
 
 s32 _sys_lwcond_destroy(u32 lwcond_id)
 {
-	sys_lwcond.Warning("_sys_lwcond_destroy(lwcond_id=%d)", lwcond_id);
+	sys_lwcond.Warning("_sys_lwcond_destroy(lwcond_id=0x%x)", lwcond_id);
 
 	LV2_LOCK;
 
-	std::shared_ptr<lwcond_t> cond;
+	const auto cond = Emu.GetIdManager().get<lv2_lwcond_t>(lwcond_id);
 
-	if (!Emu.GetIdManager().GetIDData(lwcond_id, cond))
+	if (!cond)
 	{
 		return CELL_ESRCH;
 	}
 
-	if (cond->waiters)
+	if (!cond->sq.empty())
 	{
 		return CELL_EBUSY;
 	}
 
-	Emu.GetIdManager().RemoveID<lwcond_t>(lwcond_id);
+	Emu.GetIdManager().remove<lv2_lwcond_t>(lwcond_id);
 
 	return CELL_OK;
 }
 
 s32 _sys_lwcond_signal(u32 lwcond_id, u32 lwmutex_id, u32 ppu_thread_id, u32 mode)
 {
-	sys_lwcond.Log("_sys_lwcond_signal(lwcond_id=%d, lwmutex_id=%d, ppu_thread_id=%d, mode=%d)", lwcond_id, lwmutex_id, ppu_thread_id, mode);
+	sys_lwcond.Log("_sys_lwcond_signal(lwcond_id=0x%x, lwmutex_id=0x%x, ppu_thread_id=0x%x, mode=%d)", lwcond_id, lwmutex_id, ppu_thread_id, mode);
 
 	LV2_LOCK;
 
-	std::shared_ptr<lwcond_t> cond;
-	std::shared_ptr<lwmutex_t> mutex;
+	const auto cond = Emu.GetIdManager().get<lv2_lwcond_t>(lwcond_id);
+	const auto mutex = Emu.GetIdManager().get<lv2_lwmutex_t>(lwmutex_id);
 
-	if (!Emu.GetIdManager().GetIDData(lwcond_id, cond))
+	if (!cond || (lwmutex_id && !mutex))
 	{
 		return CELL_ESRCH;
 	}
-
-	if (lwmutex_id && !Emu.GetIdManager().GetIDData(lwmutex_id, mutex))
-	{
-		return CELL_ESRCH;
-	}
-
-	// ppu_thread_id is ignored in current implementation
 
 	if (mode != 1 && mode != 2 && mode != 3)
 	{
-		sys_lwcond.Error("_sys_lwcond_signal(%d): invalid mode (%d)", lwcond_id, mode);
+		throw EXCEPTION("Unknown mode (%d)", mode);
 	}
 
-	if (~ppu_thread_id)
-	{
-		sys_lwcond.Todo("_sys_lwcond_signal(%d): ppu_thread_id (%d)", lwcond_id, ppu_thread_id);
-	}
+	// mode 1: lightweight mutex was initially owned by the calling thread
+	// mode 2: lightweight mutex was not owned by the calling thread and waiter hasn't been increased
+	// mode 3: lightweight mutex was forcefully owned by the calling thread
 
-	if (mode == 1)
+	// pick waiter; protocol is ignored in current implementation
+	const auto found = !~ppu_thread_id ? cond->sq.begin() : std::find_if(cond->sq.begin(), cond->sq.end(), [=](sleep_queue_t::value_type& thread)
 	{
-		// mode 1: lightweight mutex was initially owned by the calling thread
+		return thread->get_id() == ppu_thread_id;
+	});
 
-		if (!cond->waiters)
+	if (found == cond->sq.end())
+	{
+		if (mode == 1)
 		{
 			return CELL_EPERM;
 		}
-
-		cond->signaled1++;
-	}
-	else if (mode == 2)
-	{
-		// mode 2: lightweight mutex was not owned by the calling thread and waiter hasn't been increased
-
-		if (!cond->waiters)
+		else if (mode == 2)
 		{
 			return CELL_OK;
 		}
-
-		cond->signaled2++;
-	}
-	else
-	{
-		// in mode 3, lightweight mutex was forcefully owned by the calling thread
-
-		if (!cond->waiters)
+		else
 		{
 			return ~ppu_thread_id ? CELL_ENOENT : CELL_EPERM;
 		}
-
-		cond->signaled1++;
 	}
 
-	if (--cond->waiters)
-	{
-		cond->cv.notify_one();
-	}
+	// signal specified waiting thread
+	cond->notify(lv2_lock, *found, mutex, mode == 2);
+
+	cond->sq.erase(found);
 
 	return CELL_OK;
 }
 
 s32 _sys_lwcond_signal_all(u32 lwcond_id, u32 lwmutex_id, u32 mode)
 {
-	sys_lwcond.Log("_sys_lwcond_signal_all(lwcond_id=%d, lwmutex_id=%d, mode=%d)", lwcond_id, lwmutex_id, mode);
+	sys_lwcond.Log("_sys_lwcond_signal_all(lwcond_id=0x%x, lwmutex_id=0x%x, mode=%d)", lwcond_id, lwmutex_id, mode);
 
 	LV2_LOCK;
 
-	std::shared_ptr<lwcond_t> cond;
-	std::shared_ptr<lwmutex_t> mutex;
+	const auto cond = Emu.GetIdManager().get<lv2_lwcond_t>(lwcond_id);
+	const auto mutex = Emu.GetIdManager().get<lv2_lwmutex_t>(lwmutex_id);
 
-	if (!Emu.GetIdManager().GetIDData(lwcond_id, cond))
-	{
-		return CELL_ESRCH;
-	}
-
-	if (lwmutex_id && !Emu.GetIdManager().GetIDData(lwmutex_id, mutex))
+	if (!cond || (lwmutex_id && !mutex))
 	{
 		return CELL_ESRCH;
 	}
 
 	if (mode != 1 && mode != 2)
 	{
-		sys_lwcond.Error("_sys_lwcond_signal_all(%d): invalid mode (%d)", lwcond_id, mode);
+		throw EXCEPTION("Unknown mode (%d)", mode);
 	}
 
-	const s32 count = cond->waiters.exchange(0);
+	// mode 1: lightweight mutex was initially owned by the calling thread
+	// mode 2: lightweight mutex was not owned by the calling thread and waiter hasn't been increased
 
-	if (count)
+	// signal all waiting threads; protocol is ignored in current implementation
+	for (auto& thread : cond->sq)
 	{
-		cond->cv.notify_all();
+		cond->notify(lv2_lock, thread, mutex, mode == 2);
 	}
 
-	if (mode == 1)
-	{
-		// in mode 1, lightweight mutex was initially owned by the calling thread
+	// in mode 1, return the amount of threads signaled
+	const s32 result = mode == 2 ? CELL_OK : static_cast<s32>(cond->sq.size());
 
-		cond->signaled1 += count;
+	cond->sq.clear();
 
-		return count;
-	}
-	else
-	{
-		// in mode 2, lightweight mutex was not owned by the calling thread and waiter hasn't been increased
-
-		cond->signaled2 += count;
-
-		return CELL_OK;
-	}
+	return result;
 }
 
-s32 _sys_lwcond_queue_wait(u32 lwcond_id, u32 lwmutex_id, u64 timeout)
+s32 _sys_lwcond_queue_wait(PPUThread& ppu, u32 lwcond_id, u32 lwmutex_id, u64 timeout)
 {
-	sys_lwcond.Log("_sys_lwcond_queue_wait(lwcond_id=%d, lwmutex_id=%d, timeout=0x%llx)", lwcond_id, lwmutex_id, timeout);
+	sys_lwcond.Log("_sys_lwcond_queue_wait(lwcond_id=0x%x, lwmutex_id=0x%x, timeout=0x%llx)", lwcond_id, lwmutex_id, timeout);
 
 	const u64 start_time = get_system_time();
 
 	LV2_LOCK;
 
-	std::shared_ptr<lwcond_t> cond;
-	std::shared_ptr<lwmutex_t> mutex;
+	const auto cond = Emu.GetIdManager().get<lv2_lwcond_t>(lwcond_id);
+	const auto mutex = Emu.GetIdManager().get<lv2_lwmutex_t>(lwmutex_id);
 
-	if (!Emu.GetIdManager().GetIDData(lwcond_id, cond))
-	{
-		return CELL_ESRCH;
-	}
-
-	if (!Emu.GetIdManager().GetIDData(lwmutex_id, mutex))
+	if (!cond || !mutex)
 	{
 		return CELL_ESRCH;
 	}
 
 	// finalize unlocking the mutex
-	mutex->signaled++;
+	mutex->unlock(lv2_lock);
 
-	if (mutex->waiters)
+	// add waiter; protocol is ignored in current implementation
+	sleep_queue_entry_t waiter(ppu, cond->sq);
+
+	// potential mutex waiter (not added immediately)
+	sleep_queue_entry_t mutex_waiter(ppu, cond->sq, defer_sleep);
+
+	while (!ppu.unsignal())
 	{
-		mutex->cv.notify_one();
-	}
+		CHECK_EMU_STATUS;
 
-	// protocol is ignored in current implementation
-	cond->waiters++;
-
-	while (!(cond->signaled1 && mutex->signaled) && !cond->signaled2)
-	{
-		const bool is_timedout = timeout && get_system_time() - start_time > timeout;
-
-		// check timeout only if no thread signaled in mode 1 (the flaw of avoiding sleep queue)
-		if (is_timedout && !cond->signaled1)
+		if (timeout && waiter)
 		{
-			// cancel waiting
-			cond->waiters--;
+			const u64 passed = get_system_time() - start_time;
 
-			if (mutex->signaled)
+			if (passed >= timeout)
 			{
-				mutex->signaled--;
+				// try to reown the mutex if timed out
+				if (mutex->signaled)
+				{
+					mutex->signaled--;
 
-				return CELL_EDEADLK;
+					return CELL_EDEADLK;
+				}
+				else
+				{
+					return CELL_ETIMEDOUT;
+				}
 			}
-			else
-			{
-				return CELL_ETIMEDOUT;
-			}
+
+			ppu.cv.wait_for(lv2_lock, std::chrono::microseconds(timeout - passed));
 		}
-
-		if (Emu.IsStopped())
+		else
 		{
-			sys_lwcond.Warning("_sys_lwcond_queue_wait(lwcond_id=%d) aborted", lwcond_id);
-			return CELL_OK;
+			ppu.cv.wait(lv2_lock);
 		}
-
-		(cond->signaled1 ? mutex->cv : cond->cv).wait_for(lv2_lock, std::chrono::milliseconds(1));
 	}
 
-	if (cond->signaled1 && mutex->signaled)
-	{
-		mutex->signaled--;
-		cond->signaled1--;
-
-		return CELL_OK;
-	}
-	else
-	{
-		cond->signaled2--;
-
-		return CELL_EBUSY;
-	}
+	// return cause
+	return ppu.GPR[3] ? CELL_EBUSY : CELL_OK;
 }

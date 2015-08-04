@@ -72,10 +72,10 @@ s32 cellPadClearBuf(u32 port_no)
 
 s32 cellPadPeriphGetInfo(vm::ptr<CellPadPeriphInfo> info)
 {
-	sys_io.Warning("cellPadPeriphGetInfo(info_addr=0x%x)", info.addr());
+	sys_io.Warning("cellPadPeriphGetInfo(info=*0x%x)", info);
 
 	// TODO: Support other types of controllers
-	for (int i = 0; i < info->now_connect; i++)
+	for (u32 i = 0; i < info->now_connect; i++)
 	{
 		info->pclass_type[i] = CELL_PAD_PCLASS_TYPE_STANDARD;
 	}
@@ -83,9 +83,14 @@ s32 cellPadPeriphGetInfo(vm::ptr<CellPadPeriphInfo> info)
 	return CELL_OK;
 }
 
+s32 cellPadPeriphGetData()
+{
+	throw EXCEPTION("");
+}
+
 s32 cellPadGetData(u32 port_no, vm::ptr<CellPadData> data)
 {
-	sys_io.Log("cellPadGetData(port_no=%d, data_addr=0x%x)", port_no, data.addr());
+	sys_io.Log("cellPadGetData(port_no=%d, data=*0x%x)", port_no, data);
 
 	std::vector<Pad>& pads = Emu.GetPadManager().GetPads();
 
@@ -262,9 +267,14 @@ s32 cellPadGetData(u32 port_no, vm::ptr<CellPadData> data)
 	return CELL_OK;
 }
 
-s32 cellPadGetDataExtra(u32 port_no, u32 device_type_addr, u32 data_addr)
+s32 cellPadGetRawData(u32 port_no, vm::ptr<CellPadData> data)
 {
-	sys_io.Log("cellPadGetDataExtra(port_no=%d, device_type_addr=0x%x, device_type_addr=0x%x)", port_no, device_type_addr, data_addr);
+	throw EXCEPTION("");
+}
+
+s32 cellPadGetDataExtra(u32 port_no, vm::ptr<u32> device_type, vm::ptr<CellPadData> data)
+{
+	sys_io.Log("cellPadGetDataExtra(port_no=%d, device_type=*0x%x, device_type=*0x%x)", port_no, device_type, data);
 
 	if (!Emu.GetPadManager().IsInited())
 		return CELL_PAD_ERROR_UNINITIALIZED;
@@ -279,9 +289,9 @@ s32 cellPadGetDataExtra(u32 port_no, u32 device_type_addr, u32 data_addr)
 	return CELL_OK;
 }
 
-s32 cellPadSetActDirect(u32 port_no, u32 param_addr)
+s32 cellPadSetActDirect(u32 port_no, vm::ptr<struct CellPadActParam> param)
 {
-	sys_io.Log("cellPadSetActDirect(port_no=%d, param_addr=0x%x)", port_no, param_addr);
+	sys_io.Log("cellPadSetActDirect(port_no=%d, param=*0x%x)", port_no, param);
 
 	if (!Emu.GetPadManager().IsInited())
 		return CELL_PAD_ERROR_UNINITIALIZED;
@@ -298,7 +308,7 @@ s32 cellPadSetActDirect(u32 port_no, u32 param_addr)
 
 s32 cellPadGetInfo(vm::ptr<CellPadInfo> info)
 {
-	sys_io.Log("cellPadGetInfo(info_addr=0x%x)", info.addr());
+	sys_io.Log("cellPadGetInfo(info=*0x%x)", info);
 
 	if (!Emu.GetPadManager().IsInited())
 		return CELL_PAD_ERROR_UNINITIALIZED;
@@ -327,7 +337,7 @@ s32 cellPadGetInfo(vm::ptr<CellPadInfo> info)
 
 s32 cellPadGetInfo2(vm::ptr<CellPadInfo2> info)
 {
-	sys_io.Log("cellPadGetInfo2(info_addr=0x%x)", info.addr());
+	sys_io.Log("cellPadGetInfo2(info=*0x%x)", info);
 
 	if (!Emu.GetPadManager().IsInited())
 		return CELL_PAD_ERROR_UNINITIALIZED;
@@ -498,7 +508,7 @@ s32 cellPadLddRegisterController()
 
 s32 cellPadLddDataInsert(s32 handle, vm::ptr<CellPadData> data)
 {
-	sys_io.Todo("cellPadLddDataInsert(handle=%d, data_addr=0x%x)", handle, data.addr());
+	sys_io.Todo("cellPadLddDataInsert(handle=%d, data=*0x%x)", handle, data);
 
 	if (!Emu.GetPadManager().IsInited())
 		return CELL_PAD_ERROR_UNINITIALIZED;
@@ -526,23 +536,26 @@ s32 cellPadLddUnregisterController(s32 handle)
 	return CELL_OK;
 }
 
+
 void cellPad_init()
 {
 	REG_FUNC(sys_io, cellPadInit);
 	REG_FUNC(sys_io, cellPadEnd);
 	REG_FUNC(sys_io, cellPadClearBuf);
 	REG_FUNC(sys_io, cellPadGetData);
+	REG_FUNC(sys_io, cellPadGetRawData); //
 	REG_FUNC(sys_io, cellPadGetDataExtra);
 	REG_FUNC(sys_io, cellPadSetActDirect);
-	REG_FUNC(sys_io, cellPadGetInfo);
+	REG_FUNC(sys_io, cellPadGetInfo); //
 	REG_FUNC(sys_io, cellPadGetInfo2);
 	REG_FUNC(sys_io, cellPadPeriphGetInfo);
+	REG_FUNC(sys_io, cellPadPeriphGetData);
 	REG_FUNC(sys_io, cellPadSetPortSetting);
-	REG_FUNC(sys_io, cellPadInfoPressMode);
-	REG_FUNC(sys_io, cellPadInfoSensorMode);
-	REG_FUNC(sys_io, cellPadSetPressMode);
-	REG_FUNC(sys_io, cellPadSetSensorMode);
-	REG_FUNC(sys_io, cellPadGetCapabilityInfo);
+	REG_FUNC(sys_io, cellPadInfoPressMode); //
+	REG_FUNC(sys_io, cellPadInfoSensorMode); //
+	REG_FUNC(sys_io, cellPadSetPressMode); //
+	REG_FUNC(sys_io, cellPadSetSensorMode); //
+	REG_FUNC(sys_io, cellPadGetCapabilityInfo); //
 	REG_FUNC(sys_io, cellPadLddRegisterController);
 	REG_FUNC(sys_io, cellPadLddDataInsert);
 	REG_FUNC(sys_io, cellPadLddGetPortNo);

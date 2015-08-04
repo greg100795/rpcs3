@@ -1,5 +1,7 @@
 #pragma once
 
+namespace vm { using namespace ps3; }
+
 // Return codes
 enum
 {
@@ -26,6 +28,39 @@ enum
 	CELL_PRX_ERROR_UNDEFINED_SYMBOL            = 0x80011904, // References undefined symbols
 	CELL_PRX_ERROR_UNSUPPORTED_RELOCATION_TYPE = 0x80011905, // Uses unsupported relocation type
 	CELL_PRX_ERROR_ELF_IS_REGISTERED           = 0x80011910, // Fixed ELF is already registered
+};
+
+struct sys_stub
+{
+	u8 s_size; // = 0x2c
+	u8 s_unk0;
+	be_t<u16> s_version; // = 0x1
+	be_t<u16> s_unk1; // = 0x9 // flags?
+	be_t<u16> s_imports;
+	be_t<u32> s_unk2; // = 0x0
+	be_t<u32> s_unk3; // = 0x0
+	vm::bcptr<char> s_modulename;
+	vm::bptr<u32> s_nid;
+	vm::bptr<u32> s_text;
+	be_t<u32> s_unk4; // = 0x0
+	be_t<u32> s_unk5; // = 0x0
+	be_t<u32> s_unk6; // = 0x0
+	be_t<u32> s_unk7; // = 0x0
+};
+
+struct sys_proc_prx_param
+{
+	be_t<u32> size;
+	be_t<u32> magic;
+	be_t<u32> version;
+	be_t<u32> pad0;
+	be_t<u32> libentstart;
+	be_t<u32> libentend;
+	vm::bptr<sys_stub> libstubstart;
+	vm::bptr<sys_stub> libstubend;
+	be_t<u16> ver;
+	be_t<u16> pad1;
+	be_t<u32> pad2;
 };
 
 // Information about imported or exported libraries in PRX modules
@@ -87,7 +122,7 @@ struct sys_prx_relocation_info_t
 	u8 index_value;
 	u8 index_addr;
 	be_t<u32> type;
-	vm::bptr<void, 1, u64> ptr;
+	vm::bptr<void, u64> ptr;
 };
 
 
@@ -101,11 +136,15 @@ struct sys_prx_load_module_option_t
 struct sys_prx_start_module_option_t
 {
 	be_t<u64> size;
+	be_t<u64> put;
+	vm::bptr<s32(int argc, vm::ptr<void> argv), u64> entry_point;
 };
 
 struct sys_prx_stop_module_option_t
 {
 	be_t<u64> size;
+	be_t<u64> put;
+	vm::bptr<s32(int argc, vm::ptr<void> argv), u64> entry_point;
 };
 
 struct sys_prx_unload_module_option_t
@@ -114,34 +153,37 @@ struct sys_prx_unload_module_option_t
 };
 
 // Auxiliary data types
-struct sys_prx_t
+struct lv2_prx_t
 {
-	u32 size;
-	u32 address;
-	std::string path;
-	bool isStarted;
+	const u32 id;
 
-	sys_prx_t()
-		: isStarted(false)
-	{
-	}
+	bool is_started = false;
+
+	vm::ptr<s32(int argc, vm::ptr<void> argv)> start = vm::null;
+	vm::ptr<s32(int argc, vm::ptr<void> argv)> stop = vm::null;
+	vm::ptr<s32()> exit = vm::null;
+
+	lv2_prx_t();
 };
 
+REG_ID_TYPE(lv2_prx_t, 0x23); // SYS_PRX_OBJECT
+
 // SysCalls
-s32 sys_prx_load_module(vm::ptr<const char> path, u64 flags, vm::ptr<sys_prx_load_module_option_t> pOpt);
+s32 sys_prx_load_module(vm::cptr<char> path, u64 flags, vm::ptr<sys_prx_load_module_option_t> pOpt);
+s32 sys_prx_load_module_list(s32 count, vm::cpptr<char> path_list, u64 flags, vm::ptr<sys_prx_load_module_option_t> pOpt, vm::ptr<u32> id_list);
 s32 sys_prx_load_module_on_memcontainer();
 s32 sys_prx_load_module_by_fd();
 s32 sys_prx_load_module_on_memcontainer_by_fd();
-s32 sys_prx_start_module(s32 id, u32 args, u32 argp_addr, vm::ptr<u32> modres, u64 flags, vm::ptr<sys_prx_start_module_option_t> pOpt);
-s32 sys_prx_stop_module(s32 id, u32 args, u32 argp_addr, vm::ptr<u32> modres, u64 flags, vm::ptr<sys_prx_stop_module_option_t> pOpt);
+s32 sys_prx_start_module(s32 id, u64 flags, vm::ptr<sys_prx_start_module_option_t> pOpt);
+s32 sys_prx_stop_module(s32 id, u64 flags, vm::ptr<sys_prx_stop_module_option_t> pOpt);
 s32 sys_prx_unload_module(s32 id, u64 flags, vm::ptr<sys_prx_unload_module_option_t> pOpt);
 s32 sys_prx_get_module_list();
 s32 sys_prx_get_my_module_id();
 s32 sys_prx_get_module_id_by_address();
 s32 sys_prx_get_module_id_by_name();
 s32 sys_prx_get_module_info();
-s32 sys_prx_register_library(u32 lib_addr);
-s32 sys_prx_unregister_library();
+s32 sys_prx_register_library(vm::ptr<void> library);
+s32 sys_prx_unregister_library(vm::ptr<void> library);
 s32 sys_prx_get_ppu_guid();
 s32 sys_prx_register_module();
 s32 sys_prx_query_module();

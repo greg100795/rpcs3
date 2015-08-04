@@ -6,322 +6,326 @@
 
 extern Module sceNpCommerce2;
 
-struct sceNpCommerce2Internal
-{
-	bool m_bSceNpCommerce2Initialized;
-
-	sceNpCommerce2Internal()
-		: m_bSceNpCommerce2Initialized(false)
-	{
-	}
-};
-
-sceNpCommerce2Internal sceNpCommerce2Instance;
-
-int sceNpCommerce2ExecuteStoreBrowse()
+s32 sceNpCommerce2ExecuteStoreBrowse()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2GetStoreBrowseUserdata()
+s32 sceNpCommerce2GetStoreBrowseUserdata()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2Init()
+s32 sceNpCommerce2Init()
 {
 	sceNpCommerce2.Warning("sceNpCommerce2Init()");
 
-	if (sceNpCommerce2Instance.m_bSceNpCommerce2Initialized)
-		return SCE_NP_COMMERCE2_ERROR_ALREADY_INITIALIZED;
-
-	sceNpCommerce2Instance.m_bSceNpCommerce2Initialized = true;
-
 	return CELL_OK;
 }
 
-int sceNpCommerce2Term()
+s32 sceNpCommerce2Term()
 {
 	sceNpCommerce2.Warning("sceNpCommerce2Term()");
 
-	if (!sceNpCommerce2Instance.m_bSceNpCommerce2Initialized)
-		return SCE_NP_COMMERCE2_ERROR_NOT_INITIALIZED;
-
-	sceNpCommerce2Instance.m_bSceNpCommerce2Initialized = false;
-
 	return CELL_OK;
 }
 
-int sceNpCommerce2CreateCtx()
+s32 sceNpCommerce2CreateCtx()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2DestroyCtx()
+s32 sceNpCommerce2DestroyCtx()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2CreateSessionStart()
+s32 sceNpCommerce2EmptyStoreCheckStart()
+{
+	throw EXCEPTION("");
+}
+
+s32 sceNpCommerce2EmptyStoreCheckAbort()
+{
+	throw EXCEPTION("");
+}
+
+s32 sceNpCommerce2EmptyStoreCheckFinish()
+{
+	throw EXCEPTION("");
+}
+
+s32 sceNpCommerce2CreateSessionStart()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2CreateSessionAbort()
+s32 sceNpCommerce2CreateSessionAbort()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2CreateSessionFinish()
+s32 sceNpCommerce2CreateSessionFinish()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2GetCategoryContentsCreateReq()
+s32 sceNpCommerce2GetCategoryContentsCreateReq()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2GetCategoryContentsStart()
+s32 sceNpCommerce2GetCategoryContentsStart()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2GetCategoryContentsGetResult()
+s32 sceNpCommerce2GetCategoryContentsGetResult()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2InitGetCategoryContentsResult()
+s32 sceNpCommerce2InitGetCategoryContentsResult()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2GetCategoryInfo()
+s32 sceNpCommerce2GetCategoryInfo()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2GetContentInfo()
+s32 sceNpCommerce2GetContentInfo()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2GetCategoryInfoFromContentInfo()
+s32 sceNpCommerce2GetCategoryInfoFromContentInfo()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2GetGameProductInfoFromContentInfo()
+s32 sceNpCommerce2GetGameProductInfoFromContentInfo()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2DestroyGetCategoryContentsResult()
+s32 sceNpCommerce2DestroyGetCategoryContentsResult()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2GetProductInfoCreateReq()
+s32 sceNpCommerce2GetProductInfoCreateReq()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2GetProductInfoStart()
+s32 sceNpCommerce2GetProductInfoStart()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2GetProductInfoGetResult()
+s32 sceNpCommerce2GetProductInfoGetResult()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2InitGetProductInfoResult()
+s32 sceNpCommerce2InitGetProductInfoResult()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2GetGameProductInfo()
+s32 sceNpCommerce2GetGameProductInfo()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2DestroyGetProductInfoResult()
+s32 sceNpCommerce2DestroyGetProductInfoResult()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2GetProductInfoListCreateReq()
+s32 sceNpCommerce2GetProductInfoListCreateReq()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2GetProductInfoListStart()
+s32 sceNpCommerce2GetProductInfoListStart()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2GetProductInfoListGetResult()
+s32 sceNpCommerce2GetProductInfoListGetResult()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2InitGetProductInfoListResult()
+s32 sceNpCommerce2InitGetProductInfoListResult()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2GetGameProductInfoFromGetProductInfoListResult()
+s32 sceNpCommerce2GetGameProductInfoFromGetProductInfoListResult()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2DestroyGetProductInfoListResult()
+s32 sceNpCommerce2DestroyGetProductInfoListResult()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2GetContentRatingInfoFromGameProductInfo()
+s32 sceNpCommerce2GetContentRatingInfoFromGameProductInfo()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2GetContentRatingInfoFromCategoryInfo()
+s32 sceNpCommerce2GetContentRatingInfoFromCategoryInfo()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2GetContentRatingDescriptor()
+s32 sceNpCommerce2GetContentRatingDescriptor()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2GetGameSkuInfoFromGameProductInfo()
+s32 sceNpCommerce2GetGameSkuInfoFromGameProductInfo()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2GetPrice()
+s32 sceNpCommerce2GetPrice()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2DoCheckoutStartAsync()
+s32 sceNpCommerce2DoCheckoutStartAsync()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2DoCheckoutFinishAsync()
+s32 sceNpCommerce2DoCheckoutFinishAsync()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2DoProductBrowseStartAsync()
+s32 sceNpCommerce2DoProductBrowseStartAsync()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2DoProductBrowseFinishAsync()
+s32 sceNpCommerce2DoProductBrowseFinishAsync()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2DoDlListStartAsync()
+s32 sceNpCommerce2DoDlListStartAsync()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2DoDlListFinishAsync()
+s32 sceNpCommerce2DoDlListFinishAsync()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2DoProductCodeStartAsync()
+s32 sceNpCommerce2DoProductCodeStartAsync()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2DoProductCodeFinishAsync()
+s32 sceNpCommerce2DoProductCodeFinishAsync()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2GetBGDLAvailability()
+s32 sceNpCommerce2GetBGDLAvailability()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2SetBGDLAvailability()
+s32 sceNpCommerce2SetBGDLAvailability()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2AbortReq()
+s32 sceNpCommerce2AbortReq()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
 }
 
-int sceNpCommerce2DestroyReq()
+s32 sceNpCommerce2DestroyReq()
 {
 	UNIMPLEMENTED_FUNC(sceNpCommerce2);
 	return CELL_OK;
+}
+
+s32 sceNpCommerce2DoServiceListStartAsync()
+{
+	throw EXCEPTION("");
+}
+
+s32 sceNpCommerce2DoServiceListFinishAsync()
+{
+	throw EXCEPTION("");
 }
 
 Module sceNpCommerce2("sceNpCommerce2", []()
 {
-	sceNpCommerce2Instance.m_bSceNpCommerce2Initialized = false;
-
 	REG_FUNC(sceNpCommerce2, sceNpCommerce2ExecuteStoreBrowse);
 	REG_FUNC(sceNpCommerce2, sceNpCommerce2GetStoreBrowseUserdata);
 	REG_FUNC(sceNpCommerce2, sceNpCommerce2Init);
 	REG_FUNC(sceNpCommerce2, sceNpCommerce2Term);
 	REG_FUNC(sceNpCommerce2, sceNpCommerce2CreateCtx);
 	REG_FUNC(sceNpCommerce2, sceNpCommerce2DestroyCtx);
+	REG_FUNC(sceNpCommerce2, sceNpCommerce2EmptyStoreCheckStart);
+	REG_FUNC(sceNpCommerce2, sceNpCommerce2EmptyStoreCheckAbort);
+	REG_FUNC(sceNpCommerce2, sceNpCommerce2EmptyStoreCheckFinish);
 	REG_FUNC(sceNpCommerce2, sceNpCommerce2CreateSessionStart);
 	REG_FUNC(sceNpCommerce2, sceNpCommerce2CreateSessionAbort);
 	REG_FUNC(sceNpCommerce2, sceNpCommerce2CreateSessionFinish);
@@ -363,4 +367,7 @@ Module sceNpCommerce2("sceNpCommerce2", []()
 	REG_FUNC(sceNpCommerce2, sceNpCommerce2SetBGDLAvailability);
 	REG_FUNC(sceNpCommerce2, sceNpCommerce2AbortReq);
 	REG_FUNC(sceNpCommerce2, sceNpCommerce2DestroyReq);
+
+	REG_FUNC(sceNpCommerce2, sceNpCommerce2DoServiceListStartAsync);
+	REG_FUNC(sceNpCommerce2, sceNpCommerce2DoServiceListFinishAsync);
 });

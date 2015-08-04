@@ -1,7 +1,10 @@
 #include "stdafx.h"
 #include "restore_new.h"
+#pragma warning(push)
+#pragma message("TODO: remove wx dependency: <wx/image.h>")
 #pragma warning(disable : 4996)
 #include <wx/image.h>
+#pragma warning(pop)
 #include "define_new_memleakdetect.h"
 
 #ifndef _WIN32
@@ -32,7 +35,7 @@ void rImage::SaveFile(const std::string& name, rImageType type)
 	}
 	else
 	{
-		throw std::string("unsupported type");
+		throw EXCEPTION("unsupported type");
 	}
 }
 

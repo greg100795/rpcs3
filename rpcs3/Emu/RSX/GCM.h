@@ -1,5 +1,7 @@
 #pragma once
 
+namespace vm { using namespace ps3; }
+
 enum
 {
 	CELL_GCM_DISPLAY_HSYNC            = 1,
@@ -201,9 +203,9 @@ enum
 
 struct CellGcmControl
 {
-	atomic_t<u32> put;
-	atomic_t<u32> get;
-	atomic_t<u32> ref;
+	atomic_be_t<u32> put;
+	atomic_be_t<u32> get;
+	atomic_be_t<u32> ref;
 };
 
 struct CellGcmConfig
@@ -222,9 +224,9 @@ typedef s32(CellGcmContextCallback)(vm::ptr<CellGcmContextData>, u32);
 
 struct CellGcmContextData
 {
-	be_t<u32> begin;
-	be_t<u32> end;
-	be_t<u32> current;
+	vm::bptr<u32> begin;
+	vm::bptr<u32> end;
+	vm::bptr<u32> current;
 	vm::bptr<CellGcmContextCallback> callback;
 };
 

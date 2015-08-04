@@ -5,10 +5,27 @@
 #include "rpcs3.h"
 #include "MainFrame.h"
 
+#ifdef _WIN32
+#include <windows.h>
+#include <iphlpapi.h>
+
+#pragma comment(lib, "iphlpapi.lib")
+#else
+#include "frame_icon.xpm"
+
+#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <ifaddrs.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#endif
+
 #include "git-version.h"
 #include "Ini.h"
 #include "Emu/SysCalls/Modules/cellSysutil.h"
-#include "Emu/RSX/sysutil_video.h"
+#include "Emu/SysCalls/Modules/cellVideoOut.h"
 #include "Gui/PADManager.h"
 #include "Gui/VHDDManager.h"
 #include "Gui/VFSManager.h"
@@ -120,11 +137,14 @@ MainFrame::MainFrame()
 	menu_help->Append(id_help_about, "&About...");
 
 	SetMenuBar(menubar);
+#ifdef _WIN32
+	SetIcon(wxICON(frame_icon));
+#endif
 
 	// Panels
+	m_log_frame = new LogFrame(this);
 	m_game_viewer = new GameViewer(this);
 	m_debugger_frame = new DebuggerPanel(this);
-	m_log_frame = new LogFrame(this);
 
 	AddPane(m_game_viewer, "Game List", wxAUI_DOCK_CENTRE);
 	AddPane(m_log_frame, "Log", wxAUI_DOCK_BOTTOM);
@@ -235,8 +255,7 @@ void MainFrame::InstallPkg(wxCommandEvent& WXUNUSED(event))
 		stopped = true;
 	}
 
-	wxFileDialog ctrl (this, L"Select PKG", wxEmptyString, wxEmptyString, "PKG files (*.pkg)|*.pkg|All files (*.*)|*.*",
-		wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+	wxFileDialog ctrl(this, L"Select PKG", wxEmptyString, wxEmptyString, "PKG files (*.pkg)|*.pkg|All files (*.*)|*.*", wxFD_OPEN | wxFD_FILE_MUST_EXIST);
 	
 	if(ctrl.ShowModal() == wxID_CANCEL)
 	{
@@ -247,14 +266,14 @@ void MainFrame::InstallPkg(wxCommandEvent& WXUNUSED(event))
 	Emu.Stop();
 	
 	// Open and install PKG file
-	std::string filePath = ctrl.GetPath().ToStdString();
-	rFile pkg_f(filePath, rFile::read); // TODO: Use VFS to install PKG files
+	fs::file pkg_f(ctrl.GetPath().ToStdString(), o_read);
 
-	if (pkg_f.IsOpened())
+	if (pkg_f)
 	{
-		PKGLoader pkg(pkg_f);
-		pkg.Install("/dev_hdd0/game/");
-		pkg.Close();
+		Emu.GetVFS().Init("/");
+		std::string local_path;
+		Emu.GetVFS().GetDevice("/dev_hdd0/game/", local_path);
+		PKGLoader::Install(pkg_f, local_path + "/");
 
 		// Refresh game list
 		m_game_viewer->Refresh();
@@ -345,38 +364,38 @@ void MainFrame::Config(wxCommandEvent& WXUNUSED(event))
 	}
 
 	wxDialog diag(this, wxID_ANY, "Settings", wxDefaultPosition);
-	static const u32 width = 425;
+	static const u32 width = 452;
 	static const u32 height = 460;
 
 	// Settings panels
 	wxNotebook* nb_config = new wxNotebook(&diag, wxID_ANY, wxPoint(6,6), wxSize(width, height));
 	wxPanel* p_system     = new wxPanel(nb_config, wxID_ANY);
-	wxPanel* p_cpu        = new wxPanel(nb_config, wxID_ANY);
+	wxPanel* p_core       = new wxPanel(nb_config, wxID_ANY);
 	wxPanel* p_graphics   = new wxPanel(nb_config, wxID_ANY);
 	wxPanel* p_audio      = new wxPanel(nb_config, wxID_ANY);
-	wxPanel* p_camera     = new wxPanel(nb_config, wxID_ANY);
 	wxPanel* p_io         = new wxPanel(nb_config, wxID_ANY);
-	wxPanel* p_hle        = new wxPanel(nb_config, wxID_ANY);
+	wxPanel* p_misc       = new wxPanel(nb_config, wxID_ANY);
+	wxPanel* p_networking = new wxPanel(nb_config, wxID_ANY);
 
-	nb_config->AddPage(p_cpu,      wxT("Core"));
-	nb_config->AddPage(p_graphics, wxT("Graphics"));
-	nb_config->AddPage(p_audio,    wxT("Audio"));
-	nb_config->AddPage(p_camera,   wxT("Camera"));
-	nb_config->AddPage(p_io,       wxT("Input / Output"));
-	nb_config->AddPage(p_hle,      wxT("HLE / Misc."));
-	nb_config->AddPage(p_system,   wxT("System"));
+	nb_config->AddPage(p_core,       wxT("Core"));
+	nb_config->AddPage(p_graphics,   wxT("Graphics"));
+	nb_config->AddPage(p_audio,      wxT("Audio"));
+	nb_config->AddPage(p_io,         wxT("Input / Output"));
+	nb_config->AddPage(p_misc,       wxT("Miscellaneous"));
+	nb_config->AddPage(p_networking, wxT("Networking"));
+	nb_config->AddPage(p_system,     wxT("System"));
 
-	wxBoxSizer* s_subpanel_system   = new wxBoxSizer(wxVERTICAL);
-	wxBoxSizer* s_subpanel_cpu      = new wxBoxSizer(wxVERTICAL);
-	wxBoxSizer* s_subpanel_graphics = new wxBoxSizer(wxVERTICAL);
-	wxBoxSizer* s_subpanel_audio    = new wxBoxSizer(wxVERTICAL);
-	wxBoxSizer* s_subpanel_camera   = new wxBoxSizer(wxVERTICAL);
-	wxBoxSizer* s_subpanel_io       = new wxBoxSizer(wxVERTICAL);
-	wxBoxSizer* s_subpanel_hle      = new wxBoxSizer(wxVERTICAL);
+	wxBoxSizer* s_subpanel_system     = new wxBoxSizer(wxVERTICAL);
+	wxBoxSizer* s_subpanel_core       = new wxBoxSizer(wxVERTICAL);
+	wxBoxSizer* s_subpanel_graphics   = new wxBoxSizer(wxVERTICAL);
+	wxBoxSizer* s_subpanel_audio      = new wxBoxSizer(wxVERTICAL);
+	wxBoxSizer* s_subpanel_io         = new wxBoxSizer(wxVERTICAL);
+	wxBoxSizer* s_subpanel_misc       = new wxBoxSizer(wxVERTICAL);
+	wxBoxSizer* s_subpanel_networking = new wxBoxSizer(wxVERTICAL);
 
-	// CPU/SPU settings
-	wxStaticBoxSizer* s_round_cpu_decoder = new wxStaticBoxSizer(wxVERTICAL, p_cpu, _("CPU"));
-	wxStaticBoxSizer* s_round_spu_decoder = new wxStaticBoxSizer(wxVERTICAL, p_cpu, _("SPU"));
+	// Core settings
+	wxStaticBoxSizer* s_round_cpu_decoder = new wxStaticBoxSizer(wxVERTICAL, p_core, _("CPU"));
+	wxStaticBoxSizer* s_round_spu_decoder = new wxStaticBoxSizer(wxVERTICAL, p_core, _("SPU"));
 
 	// Graphics
 	wxStaticBoxSizer* s_round_gs_render = new wxStaticBoxSizer(wxVERTICAL, p_graphics, _("Render"));
@@ -388,22 +407,24 @@ void MainFrame::Config(wxCommandEvent& WXUNUSED(event))
 	wxStaticBoxSizer* s_round_io_pad_handler      = new wxStaticBoxSizer(wxVERTICAL, p_io, _("Pad Handler"));
 	wxStaticBoxSizer* s_round_io_keyboard_handler = new wxStaticBoxSizer(wxVERTICAL, p_io, _("Keyboard Handler"));
 	wxStaticBoxSizer* s_round_io_mouse_handler    = new wxStaticBoxSizer(wxVERTICAL, p_io, _("Mouse Handler"));
+	wxStaticBoxSizer* s_round_io_camera           = new wxStaticBoxSizer(wxVERTICAL, p_io, _("Camera"));
+	wxStaticBoxSizer* s_round_io_camera_type      = new wxStaticBoxSizer(wxVERTICAL, p_io, _("Camera type"));
 	
 	// Audio
 	wxStaticBoxSizer* s_round_audio_out = new wxStaticBoxSizer(wxVERTICAL, p_audio, _("Audio Out"));
 
-	// Camera
-	wxStaticBoxSizer* s_round_camera      = new wxStaticBoxSizer(wxVERTICAL, p_camera, _("Camera"));
-	wxStaticBoxSizer* s_round_camera_type = new wxStaticBoxSizer(wxVERTICAL, p_camera, _("Camera type"));
+	// Miscellaneous
+	wxStaticBoxSizer* s_round_hle_log_lvl = new wxStaticBoxSizer(wxVERTICAL, p_misc, _("Log Level"));
 
-	// HLE / Misc.
-	wxStaticBoxSizer* s_round_hle_log_lvl = new wxStaticBoxSizer(wxVERTICAL, p_hle, _("Log Level"));
+	// Networking
+	wxStaticBoxSizer* s_round_net_status  = new wxStaticBoxSizer(wxVERTICAL, p_networking, _("Connection status"));
+	wxStaticBoxSizer* s_round_net_interface = new wxStaticBoxSizer(wxVERTICAL, p_networking, _("Network adapter"));
 
 	// System
 	wxStaticBoxSizer* s_round_sys_lang = new wxStaticBoxSizer(wxVERTICAL, p_system, _("Language"));
 
-	wxComboBox* cbox_cpu_decoder      = new wxComboBox(p_cpu, wxID_ANY);
-	wxComboBox* cbox_spu_decoder      = new wxComboBox(p_cpu, wxID_ANY);
+	wxComboBox* cbox_cpu_decoder      = new wxComboBox(p_core, wxID_ANY);
+	wxComboBox* cbox_spu_decoder      = new wxComboBox(p_core, wxID_ANY);
 	wxComboBox* cbox_gs_render        = new wxComboBox(p_graphics, wxID_ANY);
 	wxComboBox* cbox_gs_resolution    = new wxComboBox(p_graphics, wxID_ANY);
 	wxComboBox* cbox_gs_aspect        = new wxComboBox(p_graphics, wxID_ANY);
@@ -411,12 +432,16 @@ void MainFrame::Config(wxCommandEvent& WXUNUSED(event))
 	wxComboBox* cbox_pad_handler      = new wxComboBox(p_io, wxID_ANY);
 	wxComboBox* cbox_keyboard_handler = new wxComboBox(p_io, wxID_ANY);
 	wxComboBox* cbox_mouse_handler    = new wxComboBox(p_io, wxID_ANY);
+	wxComboBox* cbox_camera           = new wxComboBox(p_io, wxID_ANY);
+	wxComboBox* cbox_camera_type      = new wxComboBox(p_io, wxID_ANY);
 	wxComboBox* cbox_audio_out        = new wxComboBox(p_audio, wxID_ANY);
-	wxComboBox* cbox_camera           = new wxComboBox(p_camera, wxID_ANY);
-	wxComboBox* cbox_camera_type      = new wxComboBox(p_camera, wxID_ANY);
-	wxComboBox* cbox_hle_loglvl       = new wxComboBox(p_hle, wxID_ANY);
+	wxComboBox* cbox_hle_loglvl       = new wxComboBox(p_misc, wxID_ANY);
+	wxComboBox* cbox_net_status       = new wxComboBox(p_networking, wxID_ANY);
+	wxComboBox* cbox_net_interface    = new wxComboBox(p_networking, wxID_ANY);
 	wxComboBox* cbox_sys_lang         = new wxComboBox(p_system, wxID_ANY);
 
+	wxCheckBox* chbox_core_hook_stfunc    = new wxCheckBox(p_core, wxID_ANY, "Hook static functions");
+	wxCheckBox* chbox_core_load_liblv2    = new wxCheckBox(p_core, wxID_ANY, "Load liblv2.sprx");
 	wxCheckBox* chbox_gs_log_prog         = new wxCheckBox(p_graphics, wxID_ANY, "Log vertex/fragment programs");
 	wxCheckBox* chbox_gs_dump_depth       = new wxCheckBox(p_graphics, wxID_ANY, "Write Depth Buffer");
 	wxCheckBox* chbox_gs_dump_color       = new wxCheckBox(p_graphics, wxID_ANY, "Write Color Buffers");
@@ -425,16 +450,15 @@ void MainFrame::Config(wxCommandEvent& WXUNUSED(event))
 	wxCheckBox* chbox_gs_3dmonitor        = new wxCheckBox(p_graphics, wxID_ANY, "3D Monitor");
 	wxCheckBox* chbox_audio_dump          = new wxCheckBox(p_audio, wxID_ANY, "Dump to file");
 	wxCheckBox* chbox_audio_conv          = new wxCheckBox(p_audio, wxID_ANY, "Convert to 16 bit");
-	wxCheckBox* chbox_hle_logging         = new wxCheckBox(p_hle, wxID_ANY, "Log all SysCalls");
-	wxCheckBox* chbox_rsx_logging         = new wxCheckBox(p_hle, wxID_ANY, "RSX Logging");
-	wxCheckBox* chbox_hle_hook_stfunc     = new wxCheckBox(p_hle, wxID_ANY, "Hook static functions");
-	wxCheckBox* chbox_hle_savetty         = new wxCheckBox(p_hle, wxID_ANY, "Save TTY output to file");
-	wxCheckBox* chbox_hle_exitonstop      = new wxCheckBox(p_hle, wxID_ANY, "Exit RPCS3 when process finishes");
-	wxCheckBox* chbox_hle_always_start    = new wxCheckBox(p_hle, wxID_ANY, "Always start after boot");
+	wxCheckBox* chbox_hle_logging         = new wxCheckBox(p_misc, wxID_ANY, "Log everything");
+	wxCheckBox* chbox_rsx_logging         = new wxCheckBox(p_misc, wxID_ANY, "RSX Logging");
+	wxCheckBox* chbox_hle_savetty         = new wxCheckBox(p_misc, wxID_ANY, "Save TTY output to file");
+	wxCheckBox* chbox_hle_exitonstop      = new wxCheckBox(p_misc, wxID_ANY, "Exit RPCS3 when process finishes");
+	wxCheckBox* chbox_hle_always_start    = new wxCheckBox(p_misc, wxID_ANY, "Always start after boot");
 
 	//Auto Pause
-	wxCheckBox* chbox_dbg_ap_systemcall   = new wxCheckBox(p_hle, wxID_ANY, "Auto Pause at System Call");
-	wxCheckBox* chbox_dbg_ap_functioncall = new wxCheckBox(p_hle, wxID_ANY, "Auto Pause at Function Call");
+	wxCheckBox* chbox_dbg_ap_systemcall   = new wxCheckBox(p_misc, wxID_ANY, "Auto Pause at System Call");
+	wxCheckBox* chbox_dbg_ap_functioncall = new wxCheckBox(p_misc, wxID_ANY, "Auto Pause at Function Call");
 
 	//Custom EmulationDir
 	wxCheckBox* chbox_emulationdir_enable = new wxCheckBox(p_system, wxID_ANY, "Use Path Below as EmulationDir ? (Need Restart)");
@@ -498,6 +522,65 @@ void MainFrame::Config(wxCommandEvent& WXUNUSED(event))
 	cbox_hle_loglvl->Append("Errors");
 	cbox_hle_loglvl->Append("Nothing");
 
+	cbox_net_status->Append("IP Obtained");
+	cbox_net_status->Append("Obtaining IP");
+	cbox_net_status->Append("Connecting");
+	cbox_net_status->Append("Disconnected");
+
+#ifdef _WIN32
+	PIP_ADAPTER_INFO pAdapterInfo;
+	pAdapterInfo = (IP_ADAPTER_INFO*)malloc(sizeof(IP_ADAPTER_INFO));
+	ULONG buflen = sizeof(IP_ADAPTER_INFO);
+
+	if (GetAdaptersInfo(pAdapterInfo, &buflen) == ERROR_BUFFER_OVERFLOW)
+	{
+		free(pAdapterInfo);
+		pAdapterInfo = (IP_ADAPTER_INFO*)malloc(buflen);
+	}
+
+	if (GetAdaptersInfo(pAdapterInfo, &buflen) == NO_ERROR)
+	{
+		PIP_ADAPTER_INFO pAdapter = pAdapterInfo;
+		while (pAdapter)
+		{
+			std::string adapterName = fmt::Format("%s", pAdapter->Description);
+			cbox_net_interface->Append(adapterName);
+			pAdapter = pAdapter->Next;
+		}
+	}
+	else
+	{
+		LOG_ERROR(HLE, "Call to GetAdaptersInfo failed.");
+	}
+#else
+	struct ifaddrs *ifaddr, *ifa;
+	int family, s, n;
+	char host[NI_MAXHOST];
+
+	if (getifaddrs(&ifaddr) == -1)
+	{
+		LOG_ERROR(HLE, "Call to getifaddrs returned negative.");
+	}
+
+	for (ifa = ifaddr, n = 0; ifa != NULL; ifa = ifa->ifa_next, n++)
+	{
+		if (ifa->ifa_addr == NULL)
+		{
+			continue;
+		}
+
+		family = ifa->ifa_addr->sa_family;
+
+		if (family == AF_INET || family == AF_INET6)
+		{
+			std::string adapterName = fmt::Format("%s", ifa->ifa_name);
+			cbox_net_interface->Append(adapterName);
+		}
+	}
+
+	freeifaddrs(ifaddr);
+#endif
+
 	cbox_sys_lang->Append("Japanese");
 	cbox_sys_lang->Append("English (US)");
 	cbox_sys_lang->Append("French");
@@ -528,10 +611,11 @@ void MainFrame::Config(wxCommandEvent& WXUNUSED(event))
 	chbox_audio_conv         ->SetValue(Ini.AudioConvertToU16.GetValue());
 	chbox_hle_logging        ->SetValue(Ini.HLELogging.GetValue());
 	chbox_rsx_logging        ->SetValue(Ini.RSXLogging.GetValue());
-	chbox_hle_hook_stfunc    ->SetValue(Ini.HLEHookStFunc.GetValue());
 	chbox_hle_savetty        ->SetValue(Ini.HLESaveTTY.GetValue());
 	chbox_hle_exitonstop     ->SetValue(Ini.HLEExitOnStop.GetValue());
 	chbox_hle_always_start   ->SetValue(Ini.HLEAlwaysStart.GetValue());
+	chbox_core_hook_stfunc   ->SetValue(Ini.HookStFunc.GetValue());
+	chbox_core_load_liblv2   ->SetValue(Ini.LoadLibLv2.GetValue());
 
 	//Auto Pause related
 	chbox_dbg_ap_systemcall  ->SetValue(Ini.DBGAutoPauseSystemCall.GetValue());
@@ -554,32 +638,42 @@ void MainFrame::Config(wxCommandEvent& WXUNUSED(event))
 	cbox_camera          ->SetSelection(Ini.Camera.GetValue());
 	cbox_camera_type     ->SetSelection(Ini.CameraType.GetValue());
 	cbox_hle_loglvl      ->SetSelection(Ini.HLELogLvl.GetValue());
+	cbox_net_status      ->SetSelection(Ini.NETStatus.GetValue());
+	cbox_net_interface   ->SetSelection(Ini.NETInterface.GetValue());
 	cbox_sys_lang        ->SetSelection(Ini.SysLanguage.GetValue());
 	
+	// Core
 	s_round_cpu_decoder->Add(cbox_cpu_decoder, wxSizerFlags().Border(wxALL, 5).Expand());
 	s_round_spu_decoder->Add(cbox_spu_decoder, wxSizerFlags().Border(wxALL, 5).Expand());
 
+	// Rendering
 	s_round_gs_render->Add(cbox_gs_render, wxSizerFlags().Border(wxALL, 5).Expand());
 	s_round_gs_res->Add(cbox_gs_resolution, wxSizerFlags().Border(wxALL, 5).Expand());
 	s_round_gs_aspect->Add(cbox_gs_aspect, wxSizerFlags().Border(wxALL, 5).Expand());
 	s_round_gs_frame_limit->Add(cbox_gs_frame_limit, wxSizerFlags().Border(wxALL, 5).Expand());
 
+	// Input/Output
 	s_round_io_pad_handler->Add(cbox_pad_handler, wxSizerFlags().Border(wxALL, 5).Expand());
 	s_round_io_keyboard_handler->Add(cbox_keyboard_handler, wxSizerFlags().Border(wxALL, 5).Expand());
 	s_round_io_mouse_handler->Add(cbox_mouse_handler, wxSizerFlags().Border(wxALL, 5).Expand());
+	s_round_io_camera->Add(cbox_camera, wxSizerFlags().Border(wxALL, 5).Expand());
+	s_round_io_camera_type->Add(cbox_camera_type, wxSizerFlags().Border(wxALL, 5).Expand());
 
 	s_round_audio_out->Add(cbox_audio_out, wxSizerFlags().Border(wxALL, 5).Expand());
 
-	s_round_camera->Add(cbox_camera, wxSizerFlags().Border(wxALL, 5).Expand());
-	s_round_camera_type->Add(cbox_camera_type, wxSizerFlags().Border(wxALL, 5).Expand());
-
 	s_round_hle_log_lvl->Add(cbox_hle_loglvl, wxSizerFlags().Border(wxALL, 5).Expand());
+
+	// Networking
+	s_round_net_status->Add(cbox_net_status, wxSizerFlags().Border(wxALL, 5).Expand());
+	s_round_net_interface->Add(cbox_net_interface, wxSizerFlags().Border(wxALL, 5).Expand());
 
 	s_round_sys_lang->Add(cbox_sys_lang, wxSizerFlags().Border(wxALL, 5).Expand());
 
 	// Core
-	s_subpanel_cpu->Add(s_round_cpu_decoder, wxSizerFlags().Border(wxALL, 5).Expand());
-	s_subpanel_cpu->Add(s_round_spu_decoder, wxSizerFlags().Border(wxALL, 5).Expand());
+	s_subpanel_core->Add(s_round_cpu_decoder, wxSizerFlags().Border(wxALL, 5).Expand());
+	s_subpanel_core->Add(s_round_spu_decoder, wxSizerFlags().Border(wxALL, 5).Expand());
+	s_subpanel_core->Add(chbox_core_hook_stfunc, wxSizerFlags().Border(wxALL, 5).Expand());
+	s_subpanel_core->Add(chbox_core_load_liblv2, wxSizerFlags().Border(wxALL, 5).Expand());
 
 	// Graphics
 	s_subpanel_graphics->Add(s_round_gs_render, wxSizerFlags().Border(wxALL, 5).Expand());
@@ -597,33 +691,34 @@ void MainFrame::Config(wxCommandEvent& WXUNUSED(event))
 	s_subpanel_io->Add(s_round_io_pad_handler, wxSizerFlags().Border(wxALL, 5).Expand());
 	s_subpanel_io->Add(s_round_io_keyboard_handler, wxSizerFlags().Border(wxALL, 5).Expand());
 	s_subpanel_io->Add(s_round_io_mouse_handler, wxSizerFlags().Border(wxALL, 5).Expand());
+	s_subpanel_io->Add(s_round_io_camera, wxSizerFlags().Border(wxALL, 5).Expand());
+	s_subpanel_io->Add(s_round_io_camera_type, wxSizerFlags().Border(wxALL, 5).Expand());
 
 	// Audio
 	s_subpanel_audio->Add(s_round_audio_out, wxSizerFlags().Border(wxALL, 5).Expand());
 	s_subpanel_audio->Add(chbox_audio_dump, wxSizerFlags().Border(wxALL, 5).Expand());
 	s_subpanel_audio->Add(chbox_audio_conv, wxSizerFlags().Border(wxALL, 5).Expand());
 
-	// Camera
-	s_subpanel_camera->Add(s_round_camera, wxSizerFlags().Border(wxALL, 5).Expand());
-	s_subpanel_camera->Add(s_round_camera_type, wxSizerFlags().Border(wxALL, 5).Expand());
+	// Miscellaneous
+	s_subpanel_misc->Add(s_round_hle_log_lvl, wxSizerFlags().Border(wxALL, 5).Expand());
+	s_subpanel_misc->Add(chbox_hle_logging, wxSizerFlags().Border(wxALL, 5).Expand());
+	s_subpanel_misc->Add(chbox_rsx_logging, wxSizerFlags().Border(wxALL, 5).Expand());
+	s_subpanel_misc->Add(chbox_hle_savetty, wxSizerFlags().Border(wxALL, 5).Expand());
+	s_subpanel_misc->Add(chbox_hle_exitonstop, wxSizerFlags().Border(wxALL, 5).Expand());
+	s_subpanel_misc->Add(chbox_hle_always_start, wxSizerFlags().Border(wxALL, 5).Expand());
 
-	// HLE / Misc.
-	s_subpanel_hle->Add(s_round_hle_log_lvl, wxSizerFlags().Border(wxALL, 5).Expand());
-	s_subpanel_hle->Add(chbox_hle_logging, wxSizerFlags().Border(wxALL, 5).Expand());
-	s_subpanel_hle->Add(chbox_rsx_logging, wxSizerFlags().Border(wxALL, 5).Expand());
-	s_subpanel_hle->Add(chbox_hle_hook_stfunc, wxSizerFlags().Border(wxALL, 5).Expand());
-	s_subpanel_hle->Add(chbox_hle_savetty, wxSizerFlags().Border(wxALL, 5).Expand());
-	s_subpanel_hle->Add(chbox_hle_exitonstop, wxSizerFlags().Border(wxALL, 5).Expand());
-	s_subpanel_hle->Add(chbox_hle_always_start, wxSizerFlags().Border(wxALL, 5).Expand());
+	// Auto Pause
+	s_subpanel_misc->Add(chbox_dbg_ap_systemcall, wxSizerFlags().Border(wxALL, 5).Expand());
+	s_subpanel_misc->Add(chbox_dbg_ap_functioncall, wxSizerFlags().Border(wxALL, 5).Expand());
 
-	//Auto Pause
-	s_subpanel_hle->Add(chbox_dbg_ap_systemcall, wxSizerFlags().Border(wxALL, 5).Expand());
-	s_subpanel_hle->Add(chbox_dbg_ap_functioncall, wxSizerFlags().Border(wxALL, 5).Expand());
+	// Networking
+	s_subpanel_networking->Add(s_round_net_status, wxSizerFlags().Border(wxALL, 5).Expand());
+	s_subpanel_networking->Add(s_round_net_interface, wxSizerFlags().Border(wxALL, 5).Expand());
 
 	// System
 	s_subpanel_system->Add(s_round_sys_lang, wxSizerFlags().Border(wxALL, 5).Expand());
 
-	//Custom EmulationDir
+	// Custom EmulationDir
 	s_subpanel_system->Add(chbox_emulationdir_enable, wxSizerFlags().Border(wxALL, 5).Expand());
 	s_subpanel_system->Add(txt_emulationdir_path, wxSizerFlags().Border(wxALL, 5).Expand());
 	
@@ -633,21 +728,23 @@ void MainFrame::Config(wxCommandEvent& WXUNUSED(event))
 	s_b_panel->Add(new wxButton(&diag, wxID_CANCEL), wxSizerFlags().Border(wxALL, 5).Bottom());
 
 	// Resize panels 
-	diag.SetSizerAndFit(s_subpanel_cpu, false);
+	diag.SetSizerAndFit(s_subpanel_core, false);
 	diag.SetSizerAndFit(s_subpanel_graphics, false);
 	diag.SetSizerAndFit(s_subpanel_io, false);
 	diag.SetSizerAndFit(s_subpanel_audio, false);
-	diag.SetSizerAndFit(s_subpanel_camera, false);
-	diag.SetSizerAndFit(s_subpanel_hle, false);
+	diag.SetSizerAndFit(s_subpanel_misc, false);
+	diag.SetSizerAndFit(s_subpanel_networking, false);
 	diag.SetSizerAndFit(s_subpanel_system, false);
 	diag.SetSizerAndFit(s_b_panel, false);
 	
-	diag.SetSize(width+26, height+80);
+	diag.SetSize(width + 26, height + 80);
 
 	if(diag.ShowModal() == wxID_OK)
 	{
 		Ini.CPUDecoderMode.SetValue(cbox_cpu_decoder->GetSelection());
 		Ini.SPUDecoderMode.SetValue(cbox_spu_decoder->GetSelection());
+		Ini.HookStFunc.SetValue(chbox_core_hook_stfunc->GetValue());
+		Ini.LoadLibLv2.SetValue(chbox_core_load_liblv2->GetValue());
 		Ini.GSRenderMode.SetValue(cbox_gs_render->GetSelection());
 		Ini.GSResolution.SetValue(ResolutionNumToId(cbox_gs_resolution->GetSelection() + 1));
 		Ini.GSAspectRatio.SetValue(cbox_gs_aspect->GetSelection() + 1);
@@ -668,10 +765,11 @@ void MainFrame::Config(wxCommandEvent& WXUNUSED(event))
 		Ini.CameraType.SetValue(cbox_camera_type->GetSelection());
 		Ini.HLELogging.SetValue(chbox_hle_logging->GetValue());
 		Ini.RSXLogging.SetValue(chbox_rsx_logging->GetValue());
-		Ini.HLEHookStFunc.SetValue(chbox_hle_hook_stfunc->GetValue());
 		Ini.HLESaveTTY.SetValue(chbox_hle_savetty->GetValue());
 		Ini.HLEExitOnStop.SetValue(chbox_hle_exitonstop->GetValue());
 		Ini.HLELogLvl.SetValue(cbox_hle_loglvl->GetSelection());
+		Ini.NETStatus.SetValue(cbox_net_status->GetSelection());
+		Ini.NETInterface.SetValue(cbox_net_interface->GetSelection());
 		Ini.SysLanguage.SetValue(cbox_sys_lang->GetSelection());
 		Ini.HLEAlwaysStart.SetValue(chbox_hle_always_start->GetValue());
 
@@ -828,15 +926,15 @@ void MainFrame::UpdateUI(wxCommandEvent& event)
 	wxMenuBar& menubar( *GetMenuBar() );
 
 	// Emulation
-	wxMenuItem& pause = *menubar.FindItem( id_sys_pause );
-	wxMenuItem& stop  = *menubar.FindItem( id_sys_stop );
+	wxMenuItem& pause = *menubar.FindItem(id_sys_pause);
+	wxMenuItem& stop  = *menubar.FindItem(id_sys_stop);
 	pause.SetItemLabel(is_running ? "&Pause\tCtrl + P" : is_ready ? "&Start\tCtrl + E" : "&Resume\tCtrl + E");
 	pause.Enable(!is_stopped);
 	stop.Enable(!is_stopped);
 
 	// PS3 Commands
-	wxMenuItem& send_exit = *menubar.FindItem( id_sys_send_exit );
-	wxMenuItem& send_open_menu = *menubar.FindItem( id_sys_send_open_menu );
+	wxMenuItem& send_exit = *menubar.FindItem(id_sys_send_exit);
+	wxMenuItem& send_open_menu = *menubar.FindItem(id_sys_send_open_menu);
 	bool enable_commands = !is_stopped;
 	send_open_menu.SetItemLabel(wxString::Format("Send &%s system menu cmd", (m_sys_menu_opened ? "close" : "open")));
 	send_open_menu.Enable(enable_commands);

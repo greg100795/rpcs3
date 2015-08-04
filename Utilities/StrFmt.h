@@ -48,55 +48,54 @@ namespace fmt
 	// the stream `os`. Then write `arg` to to the stream. If there's no
 	// `fmt::placeholder` after `pos` everything in `fmt` after pos is written
 	// to `os`. Then `arg` is written to `os` after appending a space character
-	template<typename T>
-	empty_t write(const std::string &fmt, std::ostream &os, std::string::size_type &pos, T &&arg)
-	{
-		std::string::size_type ins = fmt.find(placeholder, pos);
+	//template<typename T>
+	//empty_t write(const std::string &fmt, std::ostream &os, std::string::size_type &pos, T &&arg)
+	//{
+	//	std::string::size_type ins = fmt.find(placeholder, pos);
 
-		if (ins == std::string::npos)
-		{
-			os.write(fmt.data() + pos, fmt.size() - pos);
-			os << ' ' << arg;
+	//	if (ins == std::string::npos)
+	//	{
+	//		os.write(fmt.data() + pos, fmt.size() - pos);
+	//		os << ' ' << arg;
 
-			pos = fmt.size();
-		}
-		else
-		{
-			os.write(fmt.data() + pos, ins - pos);
-			os << arg;
+	//		pos = fmt.size();
+	//	}
+	//	else
+	//	{
+	//		os.write(fmt.data() + pos, ins - pos);
+	//		os << arg;
 
-			pos = ins + placeholder.size();
-		}
-		return{};
-	}
+	//		pos = ins + placeholder.size();
+	//	}
+	//	return{};
+	//}
 
 	// typesafe version of a sprintf-like function. Returns the printed to
 	// string. To mark positions where the arguments are supposed to be
 	// inserted use `fmt::placeholder`. If there's not enough placeholders
 	// the rest of the arguments are appended at the end, seperated by spaces
-	template<typename  ... Args>
-	std::string SFormat(const std::string &fmt, Args&& ... parameters)
-	{
-		std::ostringstream os;
-		std::string::size_type pos = 0;
-		std::initializer_list<empty_t> { write(fmt, os, pos, parameters)... };
+	//template<typename  ... Args>
+	//std::string SFormat(const std::string &fmt, Args&& ... parameters)
+	//{
+	//	std::ostringstream os;
+	//	std::string::size_type pos = 0;
+	//	std::initializer_list<empty_t> { write(fmt, os, pos, parameters)... };
 
-		if (!fmt.empty())
-		{
-			os.write(fmt.data() + pos, fmt.size() - pos);
-		}
+	//	if (!fmt.empty())
+	//	{
+	//		os.write(fmt.data() + pos, fmt.size() - pos);
+	//	}
 
-		std::string result = os.str();
-		return result;
-	}
+	//	std::string result = os.str();
+	//	return result;
+	//}
 
 	//small wrapper used to deal with bitfields
 	template<typename T>
 	T by_value(T x) { return x; }
 
 	//wrapper to deal with advance sprintf formating options with automatic length finding
-	template<typename  ... Args>
-	std::string Format(const char* fmt, Args ... parameters)
+	template<typename... Args> std::string Format(const char* fmt, Args... parameters)
 	{
 		size_t length = 256;
 		std::string str;
@@ -105,10 +104,10 @@ namespace fmt
 		{
 			std::vector<char> buffptr(length);
 #if !defined(_MSC_VER)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wformat-security"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wformat-security"
 			size_t printlen = snprintf(buffptr.data(), length, fmt, std::forward<Args>(parameters)...);
-#pragma clang diagnostic pop
+#pragma GCC diagnostic pop
 #else
 			size_t printlen = _snprintf_s(buffptr.data(), length, length - 1, fmt, std::forward<Args>(parameters)...);
 #endif
@@ -139,7 +138,7 @@ namespace fmt
 
 				if (src.substr(pos, comp_length) == list[i].first)
 				{
-					src = (pos ? src.substr(0, pos) + list[i].second : list[i].second) + std::string(src.c_str() + pos + comp_length);
+					src = (pos ? src.substr(0, pos) + list[i].second : list[i].second) + src.substr(pos + comp_length);
 					pos += list[i].second.length() - 1;
 					break;
 				}
@@ -163,7 +162,7 @@ namespace fmt
 
 				if (src.substr(pos, comp_length) == list[i].first)
 				{
-					src = (pos ? src.substr(0, pos) + list[i].second() : list[i].second()) + std::string(src.c_str() + pos + comp_length);
+					src = (pos ? src.substr(0, pos) + list[i].second() : list[i].second()) + src.substr(pos + comp_length);
 					pos += list[i].second().length() - 1;
 					break;
 				}
@@ -180,9 +179,9 @@ namespace fmt
 	template<typename T, bool is_enum = std::is_enum<T>::value>
 	struct unveil
 	{
-		typedef T result_type;
+		using result_type = T;
 
-		__forceinline static result_type get_value(const T& arg)
+		force_inline static result_type get_value(const T& arg)
 		{
 			return arg;
 		}
@@ -191,9 +190,9 @@ namespace fmt
 	template<>
 	struct unveil<char*, false>
 	{
-		typedef const char* result_type;
+		using result_type = const char*;
 
-		__forceinline static result_type get_value(const char* arg)
+		force_inline static result_type get_value(const char* arg)
 		{
 			return arg;
 		}
@@ -202,9 +201,9 @@ namespace fmt
 	template<size_t N>
 	struct unveil<const char[N], false>
 	{
-		typedef const char* result_type;
+		using result_type = const char*;
 
-		__forceinline static result_type get_value(const char(&arg)[N])
+		force_inline static result_type get_value(const char(&arg)[N])
 		{
 			return arg;
 		}
@@ -213,9 +212,9 @@ namespace fmt
 	template<>
 	struct unveil<std::string, false>
 	{
-		typedef const char* result_type;
+		using result_type = const char*;
 
-		__forceinline static result_type get_value(const std::string& arg)
+		force_inline static result_type get_value(const std::string& arg)
 		{
 			return arg.c_str();
 		}
@@ -224,27 +223,38 @@ namespace fmt
 	template<typename T>
 	struct unveil<T, true>
 	{
-		typedef typename std::underlying_type<T>::type result_type;
+		using result_type = std::underlying_type_t<T>;
 
-		__forceinline static result_type get_value(const T& arg)
+		force_inline static result_type get_value(const T& arg)
 		{
 			return static_cast<result_type>(arg);
 		}
 	};
 
-	template<typename T, typename T2>
-	struct unveil<be_t<T, T2>, false>
+	template<typename T>
+	struct unveil<be_t<T>, false>
 	{
-		typedef typename unveil<T>::result_type result_type;
+		using result_type = typename unveil<T>::result_type;
 
-		__forceinline static result_type get_value(const be_t<T, T2>& arg)
+		force_inline static result_type get_value(const be_t<T>& arg)
 		{
 			return unveil<T>::get_value(arg.value());
 		}
 	};
 
 	template<typename T>
-	__forceinline typename unveil<T>::result_type do_unveil(const T& arg)
+	struct unveil<le_t<T>, false>
+	{
+		using result_type = typename unveil<T>::result_type;
+
+		force_inline static result_type get_value(const le_t<T>& arg)
+		{
+			return unveil<T>::get_value(arg.value());
+		}
+	};
+
+	template<typename T>
+	force_inline typename unveil<T>::result_type do_unveil(const T& arg)
 	{
 		return unveil<T>::get_value(arg);
 	}
@@ -258,19 +268,47 @@ namespace fmt
 	be_t<> forced to .value() (fmt::unveil reverts byte order automatically)
 
 	External specializations for fmt::unveil (can be found in another headers):
-	vm::ps3::ptr (fmt::unveil) (vm_ptr.h) (with appropriate address type, using .addr() can be avoided)
-	vm::ps3::bptr (fmt::unveil) (vm_ptr.h)
-	vm::psv::ptr (fmt::unveil) (vm_ptr.h)
-	vm::ps3::ref (fmt::unveil) (vm_ref.h)
-	vm::ps3::bref (fmt::unveil) (vm_ref.h)
-	vm::psv::ref (fmt::unveil) (vm_ref.h)
+	vm::ptr, vm::bptr, ... (fmt::unveil) (vm_ptr.h) (with appropriate address type, using .addr() can be avoided)
+	vm::ref, vm::bref, ... (fmt::unveil) (vm_ref.h)
 	
 	*/
-	template<typename... Args>
-	__forceinline __safebuffers std::string format(const char* fmt, Args... args)
+	template<typename... Args> force_inline safe_buffers std::string format(const char* fmt, Args... args)
 	{
 		return Format(fmt, do_unveil(args)...);
 	}
+
+	struct exception
+	{
+		std::unique_ptr<char[]> message;
+
+		template<typename... Args> never_inline safe_buffers exception(const char* file, int line, const char* func, const char* text, Args... args)
+		{
+			const std::string data = format(text, args...) + format("\n(in file %s:%d, in function %s)", file, line, func);
+
+			message = std::make_unique<char[]>(data.size() + 1);
+
+			std::memcpy(message.get(), data.c_str(), data.size() + 1);
+		}
+
+		exception(const exception& other)
+		{
+			const std::size_t size = std::strlen(other);
+
+			message = std::make_unique<char[]>(size + 1);
+
+			std::memcpy(message.get(), other, size + 1);
+		}
+
+		exception(exception&& other)
+		{
+			message = std::move(other.message);
+		}
+
+		operator const char*() const
+		{
+			return message.get();
+		}
+	};
 
 	//convert a wxString to a std::string encoded in utf8
 	//CAUTION, only use this to interface with wxWidgets classes
@@ -291,8 +329,54 @@ namespace fmt
 	std::vector<std::string> rSplit(const std::string& source, const std::string& delim);
 
 	std::vector<std::string> split(const std::string& source, std::initializer_list<std::string> separators, bool is_skip_empty = true);
-	std::string merge(std::vector<std::string> source, const std::string& separator);
-	std::string merge(std::initializer_list<std::vector<std::string>> sources, const std::string& separator);
+
+	template<typename T>
+	std::string merge(const T& source, const std::string& separator)
+	{
+		if (!source.size())
+		{
+			return{};
+		}
+
+		std::string result;
+
+		auto it = source.begin();
+		auto end = source.end();
+		for (--end; it != end; ++it)
+		{
+			result += *it + separator;
+		}
+
+		return result + source.back();
+	}
+
+	template<typename T>
+	std::string merge(std::initializer_list<T> sources, const std::string& separator)
+	{
+		if (!sources.size())
+		{
+			return{};
+		}
+
+		std::string result;
+		bool first = true;
+
+		for (auto &v : sources)
+		{
+			if (first)
+			{
+				result = fmt::merge(v, separator);
+				first = false;
+			}
+			else
+			{
+				result += separator + fmt::merge(v, separator);
+			}
+		}
+
+		return result;
+	}
+
 	std::string tolower(std::string source);
 	std::string toupper(std::string source);
 	std::string escape(std::string source);

@@ -5,7 +5,6 @@
 #include "Emu/System.h"
 #include "Emu/SysCalls/Modules.h"
 #include "Emu/SysCalls/SysCalls.h"
-#include "Emu/SysCalls/CB_FUNC.h"
 #include "Crypto/sha1.h"
 #include "ModuleManager.h"
 #include "Emu/Cell/PPUInstrTable.h"
@@ -15,9 +14,19 @@ std::vector<StaticFunc> g_ppu_func_subs;
 
 u32 add_ppu_func(ModuleFunc func)
 {
+	if (g_ppu_func_list.empty())
+	{
+		// prevent relocations if the array growths, must be sizeof(ModuleFunc) * 0x8000 ~~ about 1 MB of memory
+		g_ppu_func_list.reserve(0x8000);
+	}
+
 	for (auto& f : g_ppu_func_list)
 	{
-		assert(f.id != func.id);
+		if (f.id == func.id)
+		{
+			// if NIDs overlap or if the same function is added twice
+			throw EXCEPTION("NID already exists: 0x%08x (%s)", f.id, f.name);
+		}
 	}
 
 	g_ppu_func_list.push_back(func);
@@ -26,37 +35,19 @@ u32 add_ppu_func(ModuleFunc func)
 
 u32 add_ppu_func_sub(StaticFunc func)
 {
-	g_ppu_func_subs.push_back(func);
+	g_ppu_func_subs.emplace_back(func);
 	return func.index;
 }
 
-u32 add_ppu_func_sub(const char group[8], const SearchPatternEntry ops[], const size_t count, const char* name, Module* module, ppu_func_caller func)
+u32 add_ppu_func_sub(const std::initializer_list<SearchPatternEntry>& ops, const char* name, Module* module, ppu_func_caller func)
 {
-	char group_name[9] = {};
-
-	if (group)
-	{
-		strcpy_trunc(group_name, group);
-	}
-
 	StaticFunc sf;
 	sf.index = add_ppu_func(ModuleFunc(get_function_id(name), 0, module, name, func));
 	sf.name = name;
-	sf.group = *(u64*)group_name;
 	sf.found = 0;
+	sf.ops = ops;
 
-	for (u32 i = 0; i < count; i++)
-	{
-		SearchPatternEntry op;
-		op.type = ops[i].type;
-		op.data = re32(ops[i].data);
-		op.mask = re32(ops[i].mask);
-		op.num = ops[i].num;
-		assert(!op.mask || (op.data & ~op.mask) == 0);
-		sf.ops.push_back(op);
-	}
-
-	return add_ppu_func_sub(sf);
+	return add_ppu_func_sub(std::move(sf));
 }
 
 ModuleFunc* get_ppu_func_by_nid(u32 nid, u32* out_index)
@@ -93,25 +84,70 @@ void execute_ppu_func_by_index(PPUThread& CPU, u32 index)
 {
 	if (auto func = get_ppu_func_by_index(index))
 	{
-		auto old_last_syscall = CPU.m_last_syscall;
-		CPU.m_last_syscall = func->id;
-
+		// save RTOC if necessary
 		if (index & EIF_SAVE_RTOC)
 		{
-			// save RTOC if necessary
-			vm::write64(vm::cast(CPU.GPR[1] + 0x28), CPU.GPR[2]);
+			vm::write64(VM_CAST(CPU.GPR[1] + 0x28), CPU.GPR[2]);
 		}
+
+		// save old syscall/NID value
+		const auto last_code = CPU.hle_code;
+
+		// branch directly to the LLE function
+		if (index & EIF_USE_BRANCH)
+		{
+			// for example, FastCall2 can't work with functions which do user level context switch
+
+			if (last_code)
+			{
+				throw EXCEPTION("This function cannot be called from the callback: %s (0x%llx)", SysCalls::GetFuncName(func->id), func->id);
+			}
+
+			if (!func->lle_func)
+			{
+				throw EXCEPTION("LLE function not set: %s (0x%llx)", SysCalls::GetFuncName(func->id), func->id);
+			}
+
+			if (func->flags & MFF_FORCED_HLE)
+			{
+				throw EXCEPTION("Forced HLE enabled: %s (0x%llx)", SysCalls::GetFuncName(func->id), func->id);
+			}
+
+			if (Ini.HLELogging.GetValue())
+			{
+				LOG_NOTICE(HLE, "Branch to LLE function: %s (0x%llx)", SysCalls::GetFuncName(func->id), func->id);
+			}
+
+			if (index & EIF_PERFORM_BLR)
+			{
+				throw EXCEPTION("TODO: Branch with link: %s (0x%llx)", SysCalls::GetFuncName(func->id), func->id);
+				// CPU.LR = CPU.PC + 4;
+			}
+
+			const auto data = vm::get_ptr<be_t<u32>>(func->lle_func.addr());
+			CPU.PC = data[0] - 4;
+			CPU.GPR[2] = data[1]; // set rtoc
+
+			return;
+		}
+		
+		// change current syscall/NID value
+		CPU.hle_code = func->id;
 
 		if (func->lle_func && !(func->flags & MFF_FORCED_HLE))
 		{
 			// call LLE function if available
 
+			const auto data = vm::get_ptr<be_t<u32>>(func->lle_func.addr());
+			const u32 pc = data[0];
+			const u32 rtoc = data[1];
+
 			if (Ini.HLELogging.GetValue())
 			{
 				LOG_NOTICE(HLE, "LLE function called: %s", SysCalls::GetFuncName(func->id));
 			}
-
-			func->lle_func(CPU);
+			
+			CPU.fast_call(pc, rtoc);
 
 			if (Ini.HLELogging.GetValue())
 			{
@@ -141,14 +177,20 @@ void execute_ppu_func_by_index(PPUThread& CPU, u32 index)
 		if (index & EIF_PERFORM_BLR)
 		{
 			// return if necessary
-			CPU.SetBranch(vm::cast(CPU.LR & ~3), true);
+			CPU.PC = VM_CAST(CPU.LR & ~3) - 4;
 		}
 
-		CPU.m_last_syscall = old_last_syscall;
+		// execute module-specific error check
+		if ((s64)CPU.GPR[3] < 0 && func->module && func->module->on_error)
+		{
+			func->module->on_error(CPU.GPR[3], func);
+		}
+
+		CPU.hle_code = last_code;
 	}
 	else
 	{
-		throw "Invalid function index";
+		throw EXCEPTION("Invalid function index (0x%x)", index);
 	}
 }
 
@@ -180,7 +222,7 @@ void hook_ppu_func(vm::ptr<u32> base, u32 pos, u32 size)
 
 	for (auto& sub : g_ppu_func_subs)
 	{
-		bool found = true;
+		bool found = sub.ops.size() != 0;
 
 		for (u32 k = pos, x = 0; x + 1 <= sub.ops.size(); k++, x++)
 		{
@@ -191,14 +233,14 @@ void hook_ppu_func(vm::ptr<u32> base, u32 pos, u32 size)
 			}
 
 			// skip NOP
-			if (base[k].data() == se32(0x60000000))
+			if (base[k] == 0x60000000)
 			{
 				x--;
 				continue;
 			}
 
-			const u32 data = sub.ops[x].data;
-			const u32 mask = sub.ops[x].mask;
+			const u32 data = sub.ops[x].data.data();
+			const u32 mask = sub.ops[x].mask.data();
 
 			const bool match = (base[k].data() & mask) == data;
 
@@ -249,7 +291,7 @@ void hook_ppu_func(vm::ptr<u32> base, u32 pos, u32 size)
 					break;
 				}
 
-				const auto addr = (base[k].data() & se32(2) ? 0 : (base + k).addr()) + ((s32)base[k] << cntlz32(mask) >> (cntlz32(mask) + 2));
+				const auto addr = (base[k] & 2 ? 0 : (base + k).addr()) + ((s32)base[k] << cntlz32(mask) >> (cntlz32(mask) + 2));
 				const auto lnum = sub.ops[x].num;
 				const auto label = sub.labels.find(lnum);
 
@@ -272,15 +314,13 @@ void hook_ppu_func(vm::ptr<u32> base, u32 pos, u32 size)
 			//		break;
 			//	}
 
-			//	const auto addr = (base[k].data() & se32(2) ? 0 : (base + k).addr()) + ((s32)base[k] << cntlz32(mask) >> (cntlz32(mask) + 2));
+			//	const auto addr = (base[k] & 2 ? 0 : (base + k).addr()) + ((s32)base[k] << cntlz32(mask) >> (cntlz32(mask) + 2));
 			//	const auto nid = sub.ops[x].num;
 			//	// TODO: recursive call
 			//}
 			default:
 			{
-				LOG_ERROR(LOADER, "Unknown search pattern type (%d)", sub.ops[x].type);
-				assert(0);
-				return;
+				throw EXCEPTION("Unknown search pattern type (%d)", sub.ops[x].type);
 			}
 			}
 
@@ -292,7 +332,7 @@ void hook_ppu_func(vm::ptr<u32> base, u32 pos, u32 size)
 
 		if (found)
 		{
-			LOG_SUCCESS(LOADER, "Function '%s' hooked (addr=0x%x)", sub.name, (base + pos).addr());
+			LOG_SUCCESS(LOADER, "Function '%s' hooked (addr=*0x%x)", sub.name, base + pos);
 			sub.found++;
 			base[pos] = HACK(sub.index | EIF_PERFORM_BLR);
 		}
@@ -308,16 +348,11 @@ void hook_ppu_funcs(vm::ptr<u32> base, u32 size)
 {
 	using namespace PPU_instr;
 
-	if (!Ini.HLEHookStFunc.GetValue())
-	{
-		return;
-	}
-
 	// TODO: optimize search
 	for (u32 i = 0; i < size; i++)
 	{
 		// skip NOP
-		if (base[i].data() == se32(0x60000000))
+		if (base[i] == 0x60000000)
 		{
 			continue;
 		}
@@ -325,103 +360,30 @@ void hook_ppu_funcs(vm::ptr<u32> base, u32 size)
 		hook_ppu_func(base, i, size);
 	}
 
-	// check function groups
+	// check functions
 	for (u32 i = 0; i < g_ppu_func_subs.size(); i++)
 	{
-		if (g_ppu_func_subs[i].found) // start from some group
+		if (g_ppu_func_subs[i].found > 1)
 		{
-			const u64 group = g_ppu_func_subs[i].group;
-
-			if (!group)
-			{
-				// skip if group not set
-				continue;
-			}
-
-			enum GroupSearchResult : u32
-			{
-				GSR_SUCCESS = 0, // every function from this group has been found once
-				GSR_MISSING = 1, // (error) some function not found
-				GSR_EXCESS = 2, // (error) some function found twice or more
-			};
-			u32 res = GSR_SUCCESS;
-
-			// analyse
-			for (u32 j = 0; j < g_ppu_func_subs.size(); j++) if (g_ppu_func_subs[j].group == group)
-			{
-				u32 count = g_ppu_func_subs[j].found;
-
-				if (count == 0) // not found
-				{
-					// check if this function has been found with different pattern
-					for (u32 k = 0; k < g_ppu_func_subs.size(); k++) if (g_ppu_func_subs[k].group == group)
-					{
-						if (k != j && g_ppu_func_subs[k].index == g_ppu_func_subs[j].index)
-						{
-							count += g_ppu_func_subs[k].found;
-						}
-					}
-					if (count == 0)
-					{
-						res |= GSR_MISSING;
-						LOG_ERROR(LOADER, "Function '%s' not found", g_ppu_func_subs[j].name);
-					}
-					else if (count > 1)
-					{
-						res |= GSR_EXCESS;
-					}
-				}
-				else if (count == 1) // found
-				{
-					// ensure that this function has NOT been found with different pattern
-					for (u32 k = 0; k < g_ppu_func_subs.size(); k++) if (g_ppu_func_subs[k].group == group)
-					{
-						if (k != j && g_ppu_func_subs[k].index == g_ppu_func_subs[j].index)
-						{
-							if (g_ppu_func_subs[k].found)
-							{
-								res |= GSR_EXCESS;
-								LOG_ERROR(LOADER, "Function '%s' hooked twice", g_ppu_func_subs[j].name);
-							}
-						}
-					}
-				}
-				else
-				{
-					res |= GSR_EXCESS;
-					LOG_ERROR(LOADER, "Function '%s' hooked twice", g_ppu_func_subs[j].name);
-				}
-			}
-
-			// clear data
-			for (u32 j = 0; j < g_ppu_func_subs.size(); j++)
-			{
-				if (g_ppu_func_subs[j].group == group) g_ppu_func_subs[j].found = 0;
-			}
-
-			char group_name[9] = {};
-
-			*(u64*)group_name = group;
-
-			if (res == GSR_SUCCESS)
-			{
-				LOG_SUCCESS(LOADER, "Function group [%s] successfully hooked", group_name);
-			}
-			else
-			{
-				LOG_ERROR(LOADER, "Function group [%s] failed:%s%s", group_name,
-					(res & GSR_MISSING ? " missing;" : ""),
-					(res & GSR_EXCESS ? " excess;" : ""));
-			}
+			LOG_ERROR(LOADER, "Function '%s' hooked %u times", g_ppu_func_subs[i].found);
 		}
 	}
 }
 
 bool patch_ppu_import(u32 addr, u32 index)
 {
-	const auto data = vm::ptr<const u32>::make(addr);
+	const auto data = vm::cptr<u32>::make(addr);
 
 	using namespace PPU_instr;
+
+	if (index >= g_ppu_func_list.size())
+	{
+		return false;
+	}
+
+	const u32 imm = (g_ppu_func_list[index].flags & MFF_NO_RETURN) && !(g_ppu_func_list[index].flags & MFF_FORCED_HLE)
+		? index | EIF_USE_BRANCH
+		: index | EIF_PERFORM_BLR;
 
 	// check different patterns:
 
@@ -435,7 +397,7 @@ bool patch_ppu_import(u32 addr, u32 index)
 		data[6] == MTCTR(r0) &&
 		data[7] == BCTR())
 	{
-		vm::write32(addr, HACK(index | EIF_SAVE_RTOC | EIF_PERFORM_BLR));
+		vm::write32(addr, HACK(imm | EIF_SAVE_RTOC));
 		return true;
 	}
 
@@ -444,7 +406,7 @@ bool patch_ppu_import(u32 addr, u32 index)
 		(data[1] & 0xffff0000) == ORIS(r0, r0, 0) &&
 		(data[2] & 0xfc000003) == B(0, 0, 0))
 	{
-		const auto sub = vm::ptr<const u32>::make(addr + 8 + ((s32)data[2] << 6 >> 8 << 2));
+		const auto sub = vm::cptr<u32>::make(addr + 8 + ((s32)data[2] << 6 >> 8 << 2));
 
 		if (vm::check_addr(sub.addr(), 60) &&
 			sub[0x0] == STDU(r1, r1, -0x80) &&
@@ -463,7 +425,7 @@ bool patch_ppu_import(u32 addr, u32 index)
 			sub[0xd] == MTLR(r0) &&
 			sub[0xe] == BLR())
 		{
-			vm::write32(addr, HACK(index | EIF_PERFORM_BLR));
+			vm::write32(addr, HACK(imm));
 			return true;
 		}
 	}
@@ -486,7 +448,7 @@ bool patch_ppu_import(u32 addr, u32 index)
 		data[0xe] == MTLR(r0) &&
 		data[0xf] == BLR())
 	{
-		vm::write32(addr, HACK(index | EIF_PERFORM_BLR));
+		vm::write32(addr, HACK(imm));
 		return true;
 	}
 
@@ -507,7 +469,7 @@ bool patch_ppu_import(u32 addr, u32 index)
 		data[0xd] == MTLR(r0) &&
 		data[0xe] == BLR())
 	{
-		vm::write32(addr, HACK(index | EIF_PERFORM_BLR));
+		vm::write32(addr, HACK(imm));
 		return true;
 	}
 
@@ -527,10 +489,11 @@ bool patch_ppu_import(u32 addr, u32 index)
 		data[0xc] == LD(r2, r1, 0x28) &&
 		data[0xd] == BLR())
 	{
-		vm::write32(addr, HACK(index | EIF_PERFORM_BLR));
+		vm::write32(addr, HACK(imm));
 		return true;
 	}
 
+	//vm::write32(addr, HACK(imm));
 	return false;
 }
 
@@ -547,6 +510,11 @@ Module::~Module()
 
 void Module::Init()
 {
+	on_load = nullptr;
+	on_unload = nullptr;
+	on_stop = nullptr;
+	on_error = nullptr;
+
 	m_init();
 }
 

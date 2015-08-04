@@ -5,7 +5,7 @@
 std::string SysCalls::GetFuncName(const u64 fid)
 {
 	// check syscalls
-	switch (fid)
+	switch (~fid)
 	{
 	case 1: return "sys_process_getpid";
 	case 2: return "sys_process_wait_for_child";
@@ -26,7 +26,7 @@ std::string SysCalls::GetFuncName(const u64 fid)
 	case 29: return "sys_process_get_id";
 	case 30: return "_sys_process_get_paramsfo";
 	case 31: return "sys_process_get_ppu_guid";
-	case 41: return "sys_internal_ppu_thread_exit";
+	case 41: return "_sys_ppu_thread_exit";
 	case 43: return "sys_ppu_thread_yield";
 	case 44: return "sys_ppu_thread_join";
 	case 45: return "sys_ppu_thread_detach";
@@ -36,7 +36,7 @@ std::string SysCalls::GetFuncName(const u64 fid)
 	case 49: return "sys_ppu_thread_get_stack_information";
 	case 50: return "sys_ppu_thread_stop";
 	case 51: return "sys_ppu_thread_restart";
-	case 52: return "sys_ppu_thread_create";
+	case 52: return "_sys_ppu_thread_create";
 	case 53: return "sys_ppu_thread_start";
 	case 56: return "sys_ppu_thread_rename";
 	case 57: return "sys_ppu_thread_recover_page_fault";
@@ -63,7 +63,7 @@ std::string SysCalls::GetFuncName(const u64 fid)
 	case 81: return "sys_interrupt_tag_destroy";
 	case 82: return "sys_event_flag_create";
 	case 83: return "sys_event_flag_destroy";
-	case 84: return "sys_interrupt_thread_establish";
+	case 84: return "_sys_interrupt_thread_establish";
 	case 85: return "sys_event_flag_wait";
 	case 86: return "sys_event_flag_trywait";
 	case 87: return "sys_event_flag_set";
@@ -125,7 +125,7 @@ std::string SysCalls::GetFuncName(const u64 fid)
 	case 145: return "sys_time_get_current_time";
 	case 146: return "sys_time_get_system_time";
 	case 147: return "sys_time_get_timebase_frequency";
-	case 148: return "sys_rwlock_trywlock";
+	case 148: return "_sys_rwlock_trywlock";
 	case 150: return "sys_raw_spu_create_interrupt_tag";
 	case 151: return "sys_raw_spu_set_int_mask";
 	case 152: return "sys_raw_spu_get_int_mask";
@@ -4414,5 +4414,5 @@ std::string SysCalls::GetFuncName(const u64 fid)
 		}
 	}
 
-	return fmt::format("0x%08llX", fid);
+	return ~fid < 1024 ? fmt::format("syscall_%lld", ~fid) : fmt::format("0x%08llX", fid);
 }

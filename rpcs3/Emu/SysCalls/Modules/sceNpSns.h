@@ -1,5 +1,7 @@
 #pragma once
 
+namespace vm { using namespace ps3; }
+
 // Return codes
 enum
 {
@@ -33,6 +35,6 @@ enum
 // Intilization parameters for functionalities coordinated with Facebook
 struct SceNpSnsFbInitParams
 {
-	be_t<u32> pool;
+	vm::bptr<void> pool;
 	be_t<u32> poolSize;
 };

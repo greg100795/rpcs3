@@ -7,277 +7,254 @@
 
 extern Module cellMic;
 
-struct cellMicInternal
-{
-	bool m_bCellMicInitialized;;
-
-	cellMicInternal()
-		: m_bCellMicInitialized(false)
-	{
-	}
-};
-
-cellMicInternal cellMicInstance;
-
-int cellMicInit()
+s32 cellMicInit()
 {
 	cellMic.Warning("cellMicInit()");
 
-	if (cellMicInstance.m_bCellMicInitialized)
-		return CELL_MICIN_ERROR_ALREADY_INIT;
-
-	cellMicInstance.m_bCellMicInitialized = true;
-
 	return CELL_OK;
 }
 
-int cellMicEnd()
+s32 cellMicEnd()
 {
 	cellMic.Warning("cellMicEnd()");
 
-	if (!cellMicInstance.m_bCellMicInitialized)
-		return CELL_MICIN_ERROR_NOT_INIT;
-
-	cellMicInstance.m_bCellMicInitialized = false;
-
 	return CELL_OK;
 }
 
-int cellMicOpen()
+s32 cellMicOpen()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicClose()
+s32 cellMicClose()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicGetDeviceGUID()
+s32 cellMicGetDeviceGUID()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicGetType()
+s32 cellMicGetType()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicIsAttached()
+s32 cellMicIsAttached()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicIsOpen()
+s32 cellMicIsOpen()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicGetDeviceAttr()
+s32 cellMicGetDeviceAttr()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicSetDeviceAttr()
+s32 cellMicSetDeviceAttr()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicGetSignalAttr()
+s32 cellMicGetSignalAttr()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicSetSignalAttr()
+s32 cellMicSetSignalAttr()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicGetSignalState()
+s32 cellMicGetSignalState()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicStart()
+s32 cellMicStart()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicRead()
+s32 cellMicRead()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicStop()
+s32 cellMicStop()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicReset()
+s32 cellMicReset()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicSetNotifyEventQueue()
+s32 cellMicSetNotifyEventQueue()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicSetNotifyEventQueue2()
+s32 cellMicSetNotifyEventQueue2()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicRemoveNotifyEventQueue()
+s32 cellMicRemoveNotifyEventQueue()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicOpenEx()
+s32 cellMicOpenEx()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicStartEx()
+s32 cellMicStartEx()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicGetFormatRaw()
+s32 cellMicGetFormatRaw()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicGetFormatAux()
+s32 cellMicGetFormatAux()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicGetFormatDsp()
+s32 cellMicGetFormatDsp()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicOpenRaw()
+s32 cellMicOpenRaw()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicReadRaw()
+s32 cellMicReadRaw()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicReadAux()
+s32 cellMicReadAux()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicReadDsp()
+s32 cellMicReadDsp()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicGetStatus()
+s32 cellMicGetStatus()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicStopEx()
+s32 cellMicStopEx()
+{
+	throw EXCEPTION("Unexpected function");
+}
+
+s32 cellMicSysShareClose()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicSysShareClose()
+s32 cellMicGetFormat()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicGetFormat()
+s32 cellMicSetMultiMicNotifyEventQueue()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicSetMultiMicNotifyEventQueue()
+s32 cellMicGetFormatEx()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicGetFormatEx()
+s32 cellMicSysShareStop()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicSysShareStop()
+s32 cellMicSysShareOpen()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicSysShareOpen()
+s32 cellMicCommand()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicCommand()
+s32 cellMicSysShareStart()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicSysShareStart()
+s32 cellMicSysShareInit()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicSysShareInit()
+s32 cellMicSysShareEnd()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
 }
 
-int cellMicSysShareEnd()
-{
-	UNIMPLEMENTED_FUNC(cellMic);
-	return CELL_OK;
-}
-
-int cellMicGetDeviceIdentifier()
+s32 cellMicGetDeviceIdentifier()
 {
 	UNIMPLEMENTED_FUNC(cellMic);
 	return CELL_OK;
@@ -285,8 +262,6 @@ int cellMicGetDeviceIdentifier()
 
 Module cellMic("cellMic", []()
 {
-	cellMicInstance.m_bCellMicInitialized = false;
-
 	REG_FUNC(cellMic, cellMicInit);
 	REG_FUNC(cellMic, cellMicEnd);
 	REG_FUNC(cellMic, cellMicOpen);
@@ -322,7 +297,7 @@ Module cellMic("cellMic", []()
 	REG_FUNC(cellMic, cellMicReadDsp);
 
 	REG_FUNC(cellMic, cellMicGetStatus);
-	REG_FUNC(cellMic, cellMicStopEx);
+	REG_FUNC(cellMic, cellMicStopEx); // this function shouldn't exist
 	REG_FUNC(cellMic, cellMicSysShareClose);
 	REG_FUNC(cellMic, cellMicGetFormat);
 	REG_FUNC(cellMic, cellMicSetMultiMicNotifyEventQueue);

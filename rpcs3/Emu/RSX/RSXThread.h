@@ -5,7 +5,7 @@
 #include "RSXFragmentProgram.h"
 
 #include <stack>
-#include "Utilities/SSemaphore.h"
+#include "Utilities/Semaphore.h"
 #include "Utilities/Thread.h"
 #include "Utilities/Timer.h"
 
@@ -90,7 +90,7 @@ struct RSXTransformConstant
 	}
 };
 
-class RSXThread : public ThreadBase
+class RSXThread : protected thread_t
 {
 public:
 	static const uint m_textures_count = 16;
@@ -155,8 +155,7 @@ public:
 
 public:
 	std::mutex m_cs_main;
-	SSemaphore m_sem_flush;
-	SSemaphore m_sem_flip;
+	semaphore_t m_sem_flip;
 	u64 m_last_flip_time;
 	vm::ptr<void(u32)> m_flip_handler;
 	vm::ptr<void(u32)> m_user_handler;
@@ -343,8 +342,11 @@ public:
 	s32 m_color_conv_dtdy;
 
 	// Semaphore
-	bool m_set_semaphore_offset;
-	u32 m_semaphore_offset;
+	// PGRAPH
+	u32 m_PGRAPH_semaphore_offset;
+	//PFIFO
+	u32 m_PFIFO_semaphore_offset;
+	u32 m_PFIFO_semaphore_release_value;
 
 	// Fog
 	bool m_set_fog_mode;
@@ -446,8 +448,7 @@ public:
 
 protected:
 	RSXThread()
-		: ThreadBase("RSXThread")
-		, m_ctrl(nullptr)
+		: m_ctrl(nullptr)
 		, m_shader_ctrl(0x40)
 		, m_flip_status(0)
 		, m_flip_mode(CELL_GCM_DISPLAY_VSYNC)
@@ -548,7 +549,13 @@ protected:
 		Reset();
 	}
 
-	virtual ~RSXThread() {}
+	virtual ~RSXThread() override
+	{
+		if (joinable())
+		{
+			throw EXCEPTION("Thread not joined");
+		}
+	}
 
 	void Reset()
 	{
@@ -597,7 +604,6 @@ protected:
 		m_set_line_width = false;
 		m_set_line_smooth = false;
 		m_set_shade_mode = false;
-		m_set_semaphore_offset = false;
 		m_set_fog_mode = false;
 		m_set_fog_params = false;
 		m_set_clip_plane = false;
@@ -639,15 +645,50 @@ protected:
 
 	u32 OutOfArgsCount(const uint x, const u32 cmd, const u32 count, const u32 args_addr);
 	void DoCmd(const u32 fcmd, const u32 cmd, const u32 args_addr, const u32 count);
-	void NativeRescale(float width, float height);
 
 	virtual void OnInit() = 0;
 	virtual void OnInitThread() = 0;
 	virtual void OnExitThread() = 0;
 	virtual void OnReset() = 0;
-	virtual void ExecCMD() = 0;
-	virtual void ExecCMD(u32 cmd) = 0;
+
+	/**
+	 * This member is called when the backend is expected to render a draw call, either
+	 * indexed or not.
+	 */
+	virtual void Draw() = 0;
+
+	/**
+	* This member is called when the backend is expected to clear a target surface.
+	*/
+	virtual void Clear(u32 cmd) = 0;
+
+	/**
+	* This member is called when the backend is expected to present a target surface in
+	* either local or main memory.
+	*/
 	virtual void Flip() = 0;
+
+	/**
+	 * This member is called when RSXThread parse a TEXTURE_READ_SEMAPHORE_RELEASE
+	 * command.
+	 * Backend is expected to write value at offset when current draw textures aren't
+	 * needed anymore by the GPU and can be modified.
+	 */
+	virtual void semaphorePGRAPHTextureReadRelease(u32 offset, u32 value) = 0;
+	/**
+	* This member is called when RSXThread parse a BACK_END_WRITE_SEMAPHORE_RELEASE
+	* command.
+	* Backend is expected to write value at offset when current draw call has completed
+	* and render surface can be used.
+	*/
+	virtual void semaphorePGRAPHBackendRelease(u32 offset, u32 value) = 0;
+	/**
+	* This member is called when RSXThread parse a SEMAPHORE_ACQUIRE command.
+	* Backend and associated GPU is expected to wait that memory at offset is the same
+	* as value. In particular buffer/texture buffers value can change while backend is
+	* waiting.
+	*/
+	virtual void semaphorePFIFOAcquire(u32 offset, u32 value) = 0;
 
 	void LoadVertexData(u32 first, u32 count)
 	{

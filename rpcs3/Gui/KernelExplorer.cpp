@@ -4,9 +4,18 @@
 #include "Emu/System.h"
 
 #include "Emu/IdManager.h"
-#include "Emu/CPU/CPUThreadManager.h"
-#include "Emu/CPU/CPUThread.h"
-#include "Emu/SysCalls/SyncPrimitivesManager.h"
+#include "Emu/Cell/PPUThread.h"
+#include "Emu/Cell/SPUThread.h"
+#include "Emu/Cell/RawSPUThread.h"
+#include "Emu/SysCalls/lv2/sleep_queue.h"
+#include "Emu/SysCalls/lv2/sys_lwmutex.h"
+#include "Emu/SysCalls/lv2/sys_lwcond.h"
+#include "Emu/SysCalls/lv2/sys_mutex.h"
+#include "Emu/SysCalls/lv2/sys_cond.h"
+#include "Emu/SysCalls/lv2/sys_semaphore.h"
+#include "Emu/SysCalls/lv2/sys_event.h"
+#include "Emu/SysCalls/lv2/sys_process.h"
+
 #include "KernelExplorer.h"
 
 KernelExplorer::KernelExplorer(wxWindow* parent) 
@@ -43,202 +52,211 @@ KernelExplorer::KernelExplorer(wxWindow* parent)
 
 void KernelExplorer::Update()
 {
-	int count;
 	char name[4096];
 
 	m_tree->DeleteAllItems();
-	const u32 total_memory_usage = Memory.GetUserMemTotalSize() - Memory.GetUserMemAvailSize();
+	const u32 total_memory_usage = vm::get(vm::user_space)->used.load();
 
 	const auto& root = m_tree->AddRoot(fmt::Format("Process, ID = 0x00000001, Total Memory Usage = 0x%x (%0.2f MB)", total_memory_usage, (float)total_memory_usage / (1024 * 1024)));
+
+	union name64
+	{
+		u64 u64_data;
+		char string[8];
+
+		name64(u64 data)
+			: u64_data(data & 0x00ffffffffffffffull)
+		{
+		}
+
+		const char* operator &() const
+		{
+			return string;
+		}
+	};
 
 	// TODO: FileSystem
 
 	// Semaphores
-	count = Emu.GetIdManager().GetTypeCount(TYPE_SEMAPHORE);
-	if (count)
+	if (u32 count = Emu.GetIdManager().get_count(SYS_SEMAPHORE_OBJECT))
 	{
 		sprintf(name, "Semaphores (%d)", count);
 		const auto& node = m_tree->AppendItem(root, name);
-		for (const auto& id : Emu.GetIdManager().GetTypeIDs(TYPE_SEMAPHORE))
+
+		for (const auto id : Emu.GetIdManager().get_IDs(SYS_SEMAPHORE_OBJECT))
 		{
-			auto sem = Emu.GetSyncPrimManager().GetSemaphoreData(id);
-			sprintf(name, "Semaphore: ID = 0x%08x '%s', Count = %d, Max Count = %d", id, sem.name.c_str(), sem.count, sem.max_count);
+			const auto sem = Emu.GetIdManager().get<lv2_sema_t>(id);
+			sprintf(name, "Semaphore: ID = 0x%x '%s', Count = %d, Max Count = %d, Waiters = %#llx", id, &name64(sem->name), sem->value.load(), sem->max, sem->sq.size());
 			m_tree->AppendItem(node, name);
 		}
 	}
 
 	// Mutexes
-	count = Emu.GetIdManager().GetTypeCount(TYPE_MUTEX);
-	if (count)
+	if (u32 count = Emu.GetIdManager().get_count(SYS_MUTEX_OBJECT))
 	{
 		sprintf(name, "Mutexes (%d)", count);
 		const auto& node = m_tree->AppendItem(root, name);
-		for (const auto& id : Emu.GetIdManager().GetTypeIDs(TYPE_MUTEX))
+
+		for (const auto id : Emu.GetIdManager().get_IDs(SYS_MUTEX_OBJECT))
 		{
-			sprintf(name, "Mutex: ID = 0x%08x '%s'", id, Emu.GetSyncPrimManager().GetSyncPrimName(id, TYPE_MUTEX).c_str());
+			const auto mutex = Emu.GetIdManager().get<lv2_mutex_t>(id);
+			sprintf(name, "Mutex: ID = 0x%x '%s'", id, &name64(mutex->name));
 			m_tree->AppendItem(node, name);
 		}
 	}
 
 	// Light Weight Mutexes
-	count = Emu.GetIdManager().GetTypeCount(TYPE_LWMUTEX);
-	if (count)
+	if (u32 count = Emu.GetIdManager().get_count(SYS_LWMUTEX_OBJECT))
 	{
-		sprintf(name, "Light Weight Mutexes (%d)", count);
+		sprintf(name, "Lightweight Mutexes (%d)", count);
 		const auto& node = m_tree->AppendItem(root, name);
-		for (const auto& id : Emu.GetIdManager().GetTypeIDs(TYPE_LWMUTEX))
+
+		for (const auto id : Emu.GetIdManager().get_IDs(SYS_LWMUTEX_OBJECT))
 		{
-			auto lwm = Emu.GetSyncPrimManager().GetLwMutexData(id);
-			sprintf(name, "LW Mutex: ID = 0x%08x '%s'", id, lwm.name.c_str());
+			const auto lwm = Emu.GetIdManager().get<lv2_lwmutex_t>(id);
+			sprintf(name, "Lightweight Mutex: ID = 0x%x '%s'", id, &name64(lwm->name));
 			m_tree->AppendItem(node, name);
 		}
 	}
 
 	// Condition Variables
-	count = Emu.GetIdManager().GetTypeCount(TYPE_COND);
-	if (count)
+	if (u32 count = Emu.GetIdManager().get_count(SYS_COND_OBJECT))
 	{
 		sprintf(name, "Condition Variables (%d)", count);
 		const auto& node = m_tree->AppendItem(root, name);
-		for (const auto& id : Emu.GetIdManager().GetTypeIDs(TYPE_COND))
+
+		for (const auto id : Emu.GetIdManager().get_IDs(SYS_COND_OBJECT))
 		{
-			sprintf(name, "Condition Variable: ID = 0x%08x '%s'", id, Emu.GetSyncPrimManager().GetSyncPrimName(id, TYPE_COND).c_str());
+			const auto cond = Emu.GetIdManager().get<lv2_cond_t>(id);
+			sprintf(name, "Condition Variable: ID = 0x%x '%s'", id, &name64(cond->name));
 			m_tree->AppendItem(node, name);
 		}
 	}
 
 	// Light Weight Condition Variables
-	count = Emu.GetIdManager().GetTypeCount(TYPE_LWCOND);
-	if (count)
+	if (u32 count = Emu.GetIdManager().get_count(SYS_LWCOND_OBJECT))
 	{
-		sprintf(name, "Light Weight Condition Variables (%d)", count);
+		sprintf(name, "Lightweight Condition Variables (%d)", count);
 		const auto& node = m_tree->AppendItem(root, name);
-		for (const auto& id : Emu.GetIdManager().GetTypeIDs(TYPE_LWCOND))
+
+		for (const auto id : Emu.GetIdManager().get_IDs(SYS_LWCOND_OBJECT))
 		{
-			sprintf(name, "LW Condition Variable: ID = 0x%08x '%s'", id, Emu.GetSyncPrimManager().GetSyncPrimName(id, TYPE_LWCOND).c_str());
+			const auto lwc = Emu.GetIdManager().get<lv2_lwcond_t>(id);
+			sprintf(name, "Lightweight Condition Variable: ID = 0x%x '%s'", id, &name64(lwc->name));
 			m_tree->AppendItem(node, name);
 		}
 	}
 
 	// Event Queues
-	count = Emu.GetIdManager().GetTypeCount(TYPE_EVENT_QUEUE);
-	if (count)
+	if (u32 count = Emu.GetIdManager().get_count(SYS_EVENT_QUEUE_OBJECT))
 	{
 		sprintf(name, "Event Queues (%d)", count);
 		const auto& node = m_tree->AppendItem(root, name);
-		for (const auto& id : Emu.GetIdManager().GetTypeIDs(TYPE_EVENT_QUEUE))
+
+		for (const auto id : Emu.GetIdManager().get_IDs(SYS_EVENT_QUEUE_OBJECT))
 		{
-			sprintf(name, "Event Queue: ID = 0x%08x", id);
+			const auto queue = Emu.GetIdManager().get<lv2_event_queue_t>(id);
+			sprintf(name, "Event Queue: ID = 0x%x '%s', Key = %#llx", id, &name64(queue->name), queue->key);
+			m_tree->AppendItem(node, name);
+		}
+	}
+
+	// Event Ports
+	if (u32 count = Emu.GetIdManager().get_count(SYS_EVENT_PORT_OBJECT))
+	{
+		sprintf(name, "Event Ports (%d)", count);
+		const auto& node = m_tree->AppendItem(root, name);
+
+		for (const auto id : Emu.GetIdManager().get_IDs(SYS_EVENT_PORT_OBJECT))
+		{
+			const auto port = Emu.GetIdManager().get<lv2_event_port_t>(id);
+			sprintf(name, "Event Port: ID = 0x%x, Name = %#llx", id, port->name);
 			m_tree->AppendItem(node, name);
 		}
 	}
 
 	// Modules
-	count = Emu.GetIdManager().GetTypeCount(TYPE_PRX);
-	if (count)
+	if (u32 count = Emu.GetIdManager().get_count(SYS_PRX_OBJECT))
 	{
 		sprintf(name, "Modules (%d)", count);
 		const auto& node = m_tree->AppendItem(root, name);
 		//sprintf(name, "Segment List (%l)", 2 * objects.size()); // TODO: Assuming 2 segments per PRX file is not good
 		//m_tree->AppendItem(node, name);
-		for (const auto& id : Emu.GetIdManager().GetTypeIDs(TYPE_PRX))
+
+		for (const auto& id : Emu.GetIdManager().get_IDs(SYS_PRX_OBJECT))
 		{
-			sprintf(name, "PRX: ID = 0x%08x", id);
+			sprintf(name, "PRX: ID = 0x%x", id);
 			m_tree->AppendItem(node, name);
 		}
 	}
 
 	// Memory Containers
-	count = Emu.GetIdManager().GetTypeCount(TYPE_MEM);
-	if (count)
+	if (u32 count = Emu.GetIdManager().get_count(SYS_MEM_OBJECT))
 	{
 		sprintf(name, "Memory Containers (%d)", count);
 		const auto& node = m_tree->AppendItem(root, name);
-		for (const auto& id : Emu.GetIdManager().GetTypeIDs(TYPE_MEM))
+
+		for (const auto& id : Emu.GetIdManager().get_IDs(SYS_MEM_OBJECT))
 		{
-			sprintf(name, "Memory Container: ID = 0x%08x", id);
+			sprintf(name, "Memory Container: ID = 0x%x", id);
 			m_tree->AppendItem(node, name);
 		}
 	}
 
 	// Event Flags
-	count = Emu.GetIdManager().GetTypeCount(TYPE_EVENT_FLAG);
-	if (count)
+	if (u32 count = Emu.GetIdManager().get_count(SYS_EVENT_FLAG_OBJECT))
 	{
 		sprintf(name, "Event Flags (%d)", count);
 		const auto& node = m_tree->AppendItem(root, name);
-		for (const auto& id : Emu.GetIdManager().GetTypeIDs(TYPE_EVENT_FLAG))
+
+		for (const auto& id : Emu.GetIdManager().get_IDs(SYS_EVENT_FLAG_OBJECT))
 		{
-			sprintf(name, "Event Flag: ID = 0x%08x", id);
+			sprintf(name, "Event Flag: ID = 0x%x", id);
 			m_tree->AppendItem(node, name);
 		}
 	}
 
-	// PPU / SPU / RawSPU threads
+	// PPU Threads
+	if (u32 count = Emu.GetIdManager().get_count<PPUThread>())
 	{
-		// TODO: add mutexes owners
+		sprintf(name, "PPU Threads (%d)", count);
+		const auto& node = m_tree->AppendItem(root, name);
 
-		//const auto& objects = Emu.GetCPU().GetThreads();
-		u32 ppu_threads_count = 0;
-		u32 spu_threads_count = 0;
-		u32 raw_spu_threads_count = 0;
-		//for (const auto& thread : objects)
-		//{
-		//	if (thread->GetType() == CPU_THREAD_PPU)
-		//		ppu_threads_count++;
+		for (const auto& thread : Emu.GetIdManager().get_all<PPUThread>())
+		{
+			sprintf(name, "Thread: ID = 0x%08x '%s', - %s", thread->get_id(), thread->get_name().c_str(), thread->ThreadStatusToString());
+			m_tree->AppendItem(node, name);
+		}
+	}
 
-		//	if (thread->GetType() == CPU_THREAD_SPU)
-		//		spu_threads_count++;
+	if (u32 count = Emu.GetIdManager().get_count<SPUThread>())
+	{
+		sprintf(name, "SPU Threads (%d)", count);
+		const auto& node = m_tree->AppendItem(root, name);
 
-		//	if (thread->GetType() == CPU_THREAD_RAW_SPU)
-		//		raw_spu_threads_count++;
-		//}
+		for (const auto& thread : Emu.GetIdManager().get_all<SPUThread>())
+		{
+			if (thread->get_type() == CPU_THREAD_SPU)
+			{
+				sprintf(name, "Thread: ID = 0x%08x '%s', - %s", thread->get_id(), thread->get_name().c_str(), thread->ThreadStatusToString());
+				m_tree->AppendItem(node, name);
+			}
+		}
+	}
 
-		//if (ppu_threads_count)
-		//{
-		//	sprintf(name, "PPU Threads (%d)", ppu_threads_count);
-		//	const auto& node = m_tree->AppendItem(root, name);
+	if (u32 count = Emu.GetIdManager().get_count<RawSPUThread>())
+	{
+		sprintf(name, "RawSPU Threads (%d)", count);
+		const auto& node = m_tree->AppendItem(root, name);
 
-		//	for (const auto& thread : objects)
-		//	{
-		//		if (thread->GetType() == CPU_THREAD_PPU)
-		//		{
-		//			sprintf(name, "Thread: ID = 0x%08x '%s', - %s", thread->GetId(), thread->GetName().c_str(), thread->ThreadStatusToString().c_str());
-		//			m_tree->AppendItem(node, name);
-		//		}
-		//	}
-		//}
-
-		//if (spu_threads_count)
-		//{
-		//	sprintf(name, "SPU Threads (%d)", spu_threads_count);
-		//	const auto& node = m_tree->AppendItem(root, name);
-
-		//	for (const auto& thread : objects)
-		//	{
-		//		if (thread->GetType() == CPU_THREAD_SPU)
-		//		{
-		//			sprintf(name, "Thread: ID = 0x%08x '%s', - %s", thread->GetId(), thread->GetName().c_str(), thread->ThreadStatusToString().c_str());
-		//			m_tree->AppendItem(node, name);
-		//		}
-		//	}
-		//}
-
-		//if (raw_spu_threads_count)
-		//{
-		//	sprintf(name, "RawSPU Threads (%d)", raw_spu_threads_count);
-		//	const auto& node = m_tree->AppendItem(root, name);
-
-		//	for (const auto& thread : objects)
-		//	{
-		//		if (thread->GetType() == CPU_THREAD_RAW_SPU)
-		//		{
-		//			sprintf(name, "Thread: ID = 0x%08x '%s', - %s", thread->GetId(), thread->GetName().c_str(), thread->ThreadStatusToString().c_str());
-		//			m_tree->AppendItem(node, name);
-		//		}
-		//	}
-		//}
-
+		for (const auto& thread : Emu.GetIdManager().get_all<RawSPUThread>())
+		{
+			if (thread->get_type() == CPU_THREAD_RAW_SPU)
+			{
+				sprintf(name, "Thread: ID = 0x%08x '%s', - %s", thread->get_id(), thread->get_name().c_str(), thread->ThreadStatusToString());
+				m_tree->AppendItem(node, name);
+			}
+		}
 	}
 
 	m_tree->Expand(root);

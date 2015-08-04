@@ -5,14 +5,13 @@
 namespace vm
 {
 	template<typename AT, typename RT, typename... T>
-	__forceinline RT _ptr_base<RT(T...), 1, AT>::operator()(ARMv7Context& context, T... args) const
+	force_inline RT _ptr_base<RT(T...), AT>::operator()(ARMv7Context& context, T... args) const
 	{
-		return psv_func_detail::func_caller<RT, T...>::call(context, vm::cast(this->addr()), args...);
+		return psv_func_detail::func_caller<RT, T...>::call(context, VM_CAST(this->addr()), args...);
 	}
 }
 
-template<typename RT, typename... T>
-__forceinline RT cb_call(ARMv7Context& context, u32 addr, T... args)
+template<typename RT, typename... T> inline RT cb_call(ARMv7Context& context, u32 addr, T... args)
 {
 	return psv_func_detail::func_caller<RT, T...>::call(context, addr, args...);
 }

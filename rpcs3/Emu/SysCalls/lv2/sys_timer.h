@@ -1,5 +1,9 @@
 #pragma once
 
+#include "Utilities/Thread.h"
+
+namespace vm { using namespace ps3; }
+
 // Timer State
 enum : u32
 {
@@ -15,10 +19,9 @@ struct sys_timer_information_t
 	be_t<u32> pad;
 };
 
-// "timer_t" conflicts with some definition
-struct lv2_timer_t
+struct lv2_timer_t final
 {
-	std::weak_ptr<event_queue_t> port; // event queue
+	std::weak_ptr<lv2_event_queue_t> port; // event queue
 	u64 source; // event source
 	u64 data1; // event arg 1
 	u64 data2; // event arg 2
@@ -27,15 +30,14 @@ struct lv2_timer_t
 	u64 period; // period (oneshot if 0)
 
 	std::atomic<u32> state; // timer state
-	std::condition_variable cv;
 
-	lv2_timer_t()
-		: start(0)
-		, period(0)
-		, state(SYS_TIMER_STATE_STOP)
-	{
-	}
+	thread_t thread; // timer thread
+
+	lv2_timer_t();
+	~lv2_timer_t();
 };
+
+REG_ID_TYPE(lv2_timer_t, 0x11); // SYS_TIMER_OBJECT
 
 s32 sys_timer_create(vm::ptr<u32> timer_id);
 s32 sys_timer_destroy(u32 timer_id);

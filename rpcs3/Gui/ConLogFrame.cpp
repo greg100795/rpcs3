@@ -76,16 +76,16 @@ struct wxWriter : Log::LogListener
 				{
 					switch (msg.mServerity)
 					{
-					case Log::Notice:
+					case Log::Severity::Notice:
 						llogcon->SetDefaultStyle(m_color_white);
 						break;
-					case Log::Warning:
+					case Log::Severity::Warning:
 						llogcon->SetDefaultStyle(m_color_yellow);
 						break;
-					case Log::Error:
+					case Log::Severity::Error:
 						llogcon->SetDefaultStyle(m_color_red);
 						break;
-					case Log::Success:
+					case Log::Severity::Success:
 						llogcon->SetDefaultStyle(m_color_green);
 						break;
 					default:
@@ -102,7 +102,7 @@ struct wxWriter : Log::LogListener
 	}
 
 	//put message into the log buffer
-	void log(const Log::LogMessage &msg)
+	void log(const Log::LogMessage &msg) override
 	{
 		u8 logLevel = Ini.HLELogLvl.GetValue();
 		if (msg.mType != Log::TTY && logLevel != 0)

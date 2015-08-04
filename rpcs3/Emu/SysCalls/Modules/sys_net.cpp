@@ -3,7 +3,8 @@
 #include "Emu/SysCalls/Modules.h"
 
 #ifdef _WIN32
-#include <winsock.h>
+#include <winsock2.h>
+#include <WS2tcpip.h>
 #else
 extern "C"
 {
@@ -19,8 +20,12 @@ extern "C"
 
 extern Module sys_net;
 
-vm::ptr<s32> g_lastError = vm::ptr<s32>::make(0);
+vm::ptr<s32> g_lastError = vm::null;
 
+// We map host sockets to sequential IDs to return as FDs because syscalls using
+// socketselect(), etc. expect socket FDs to be under 1024.
+// We start at 1 because 0 is an invalid socket.
+std::vector<s64> g_socketMap{ 0 };
 
 // Auxiliary Functions
 int inet_pton4(const char *src, char *dst)
@@ -86,18 +91,16 @@ s32 getLastError()
 #endif
 }
 
-#ifdef _WIN32
-using pck_len_t = s32;
-#else
 using pck_len_t = u32;
-#endif
 
 namespace sys_net_func
 {
 	// Functions
 	s32 accept(s32 s, vm::ptr<sys_net_sockaddr> addr, vm::ptr<pck_len_t> paddrlen)
 	{
-		sys_net.Warning("accept(s=%d, family_addr=0x%x, paddrlen=0x%x)", s, addr.addr(), paddrlen.addr());
+		sys_net.Warning("accept(s=%d, family=*0x%x, paddrlen=*0x%x)", s, addr, paddrlen);
+		s = g_socketMap[s];
+
 		if (!addr) {
 			int ret = ::accept(s, nullptr, nullptr);
 			*g_lastError = getLastError();
@@ -107,8 +110,8 @@ namespace sys_net_func
 			sockaddr _addr;
 			memcpy(&_addr, addr.get_ptr(), sizeof(sockaddr));
 			_addr.sa_family = addr->sa_family;
-			pck_len_t _paddrlen;
-			int ret = ::accept(s, &_addr, &_paddrlen);
+			::socklen_t _paddrlen;
+			s32 ret = ::accept(s, &_addr, &_paddrlen);
 			*paddrlen = _paddrlen;
 			*g_lastError = getLastError();
 			return ret;
@@ -117,27 +120,33 @@ namespace sys_net_func
 
 	s32 bind(s32 s, vm::ptr<sys_net_sockaddr_in> addr, u32 addrlen)
 	{
-		sys_net.Warning("bind(s=%d, family_addr=0x%x, addrlen=%d)", s, addr.addr(), addrlen);
+		sys_net.Warning("bind(s=%d, family=*0x%x, addrlen=%d)", s, addr, addrlen);
+		s = g_socketMap[s];
+
 		sockaddr_in saddr;
 		memcpy(&saddr, addr.get_ptr(), sizeof(sockaddr_in));
 		saddr.sin_family = addr->sin_family;
 		const char *ipaddr = inet_ntoa(saddr.sin_addr);
 		sys_net.Warning("binding on %s to port %d", ipaddr, ntohs(saddr.sin_port));
-		int ret = ::bind(s, (const sockaddr *)&saddr, addrlen);
+		s32 ret = ::bind(s, (const sockaddr *)&saddr, addrlen);
 		*g_lastError = getLastError();
+
 		return ret;
 	}
 
 	s32 connect(s32 s, vm::ptr<sys_net_sockaddr_in> addr, u32 addrlen)
 	{
-		sys_net.Warning("connect(s=%d, family_addr=0x%x, addrlen=%d)", s, addr.addr(), addrlen);
+		sys_net.Warning("connect(s=%d, family=*0x%x, addrlen=%d)", s, addr, addrlen);
+		s = g_socketMap[s];
+
 		sockaddr_in saddr;
 		memcpy(&saddr, addr.get_ptr(), sizeof(sockaddr_in));
 		saddr.sin_family = addr->sin_family;
 		const char *ipaddr = inet_ntoa(saddr.sin_addr);
 		sys_net.Warning("connecting on %s to port %d", ipaddr, ntohs(saddr.sin_port));
-		int ret = ::connect(s, (const sockaddr *)&saddr, addrlen);
+		s32 ret = ::connect(s, (const sockaddr *)&saddr, addrlen);
 		*g_lastError = getLastError();
+
 		return ret;
 	}
 
@@ -171,9 +180,9 @@ namespace sys_net_func
 		return CELL_OK;
 	}
 
-	s32 inet_addr(vm::ptr<const char> cp)
+	s32 inet_addr(vm::cptr<char> cp)
 	{
-		sys_net.Warning("inet_addr(cp_addr=0x%x['%s'])", cp.addr(), cp.get_ptr());
+		sys_net.Warning("inet_addr(cp=*0x%x)", cp.addr());
 		return htonl(::inet_addr(cp.get_ptr())); // return a big-endian IP address (WTF? function should return LITTLE-ENDIAN value)
 	}
 
@@ -219,9 +228,9 @@ namespace sys_net_func
 		return CELL_OK;
 	}
 
-	s32 inet_pton(s32 af, vm::ptr<const char> src, vm::ptr<char> dst)
+	s32 inet_pton(s32 af, vm::cptr<char> src, vm::ptr<char> dst)
 	{
-		sys_net.Warning("inet_pton(af=%d, src_addr=0x%x, dst_addr=0x%x)", af, src.addr(), dst.addr());
+		sys_net.Warning("inet_pton(af=%d, src=*0x%x, dst=*0x%x)", af, src, dst);
 
 		return ::inet_pton(af, src.get_ptr(), dst.get_ptr());
 	}
@@ -229,32 +238,37 @@ namespace sys_net_func
 	s32 listen(s32 s, s32 backlog)
 	{
 		sys_net.Warning("listen(s=%d, backlog=%d)", s, backlog);
-		int ret = ::listen(s, backlog);
+		s = g_socketMap[s];
+		s32 ret = ::listen(s, backlog);
 		*g_lastError = getLastError();
+
 		return ret;
 	}
 
 	s32 recv(s32 s, vm::ptr<char> buf, u32 len, s32 flags)
 	{
-		sys_net.Warning("recv(s=%d, buf_addr=0x%x, len=%d, flags=0x%x)", s, buf.addr(), len, flags);
+		sys_net.Warning("recv(s=%d, buf=*0x%x, len=%d, flags=0x%x)", s, buf, len, flags);
+		s = g_socketMap[s];
 
-		int ret = ::recv(s, buf.get_ptr(), len, flags);
+		s32 ret = ::recv(s, buf.get_ptr(), len, flags);
 		*g_lastError = getLastError();
+
 		return ret;
 	}
 
 	s32 recvfrom(s32 s, vm::ptr<char> buf, u32 len, s32 flags, vm::ptr<sys_net_sockaddr> addr, vm::ptr<pck_len_t> paddrlen)
 	{
-		sys_net.Warning("recvfrom(s=%d, buf_addr=0x%x, len=%d, flags=0x%x, addr_addr=0x%x, paddrlen=0x%x)",
-			s, buf.addr(), len, flags, addr.addr(), paddrlen.addr());
+		sys_net.Warning("recvfrom(s=%d, buf=*0x%x, len=%d, flags=0x%x, addr=*0x%x, paddrlen=*0x%x)", s, buf, len, flags, addr, paddrlen);
+		s = g_socketMap[s];
 
 		sockaddr _addr;
 		memcpy(&_addr, addr.get_ptr(), sizeof(sockaddr));
 		_addr.sa_family = addr->sa_family;
-		pck_len_t _paddrlen;
-		int ret = ::recvfrom(s, buf.get_ptr(), len, flags, &_addr, &_paddrlen);
+		::socklen_t _paddrlen;
+		s32 ret = ::recvfrom(s, buf.get_ptr(), len, flags, &_addr, &_paddrlen);
 		*paddrlen = _paddrlen;
 		*g_lastError = getLastError();
+
 		return ret;
 	}
 
@@ -264,12 +278,14 @@ namespace sys_net_func
 		return CELL_OK;
 	}
 
-	s32 send(s32 s, vm::ptr<const char> buf, u32 len, s32 flags)
+	s32 send(s32 s, vm::cptr<char> buf, u32 len, s32 flags)
 	{
-		sys_net.Warning("send(s=%d, buf_addr=0x%x, len=%d, flags=0x%x)", s, buf.addr(), len, flags);
+		sys_net.Warning("send(s=%d, buf=*0x%x, len=%d, flags=0x%x)", s, buf, len, flags);
+		s = g_socketMap[s];
 
-		int ret = ::send(s, buf.get_ptr(), len, flags);
+		s32 ret = ::send(s, buf.get_ptr(), len, flags);
 		*g_lastError = getLastError();
+
 		return ret;
 	}
 
@@ -279,47 +295,58 @@ namespace sys_net_func
 		return CELL_OK;
 	}
 
-	s32 sendto(s32 s, vm::ptr<const char> buf, u32 len, s32 flags, vm::ptr<sys_net_sockaddr> addr, u32 addrlen)
+	s32 sendto(s32 s, vm::cptr<char> buf, u32 len, s32 flags, vm::ptr<sys_net_sockaddr> addr, u32 addrlen)
 	{
-		sys_net.Warning("sendto(s=%d, buf_addr=0x%x, len=%d, flags=0x%x, addr=0x%x, addrlen=%d)",
-			s, buf.addr(), len, flags, addr.addr(), addrlen);
+		sys_net.Warning("sendto(s=%d, buf=*0x%x, len=%d, flags=0x%x, addr=*0x%x, addrlen=%d)", s, buf, len, flags, addr, addrlen);
+		s = g_socketMap[s];
 
 		sockaddr _addr;
 		memcpy(&_addr, addr.get_ptr(), sizeof(sockaddr));
 		_addr.sa_family = addr->sa_family;
-		int ret = ::sendto(s, buf.get_ptr(), len, flags, &_addr, addrlen);
+		s32 ret = ::sendto(s, buf.get_ptr(), len, flags, &_addr, addrlen);
 		*g_lastError = getLastError();
+
 		return ret;
 	}
 
-	s32 setsockopt(s32 s, s32 level, s32 optname, vm::ptr<const char> optval, u32 optlen)
+	s32 setsockopt(s32 s, s32 level, s32 optname, vm::cptr<char> optval, u32 optlen)
 	{
-		sys_net.Warning("socket(s=%d, level=%d, optname=%d, optval_addr=0x%x, optlen=%d)", s, level, optname, optval.addr(), optlen);
+		sys_net.Warning("socket(s=%d, level=%d, optname=%d, optval=*0x%x, optlen=%d)", s, level, optname, optval, optlen);
+		s = g_socketMap[s];
 
-		int ret = ::setsockopt(s, level, optname, optval.get_ptr(), optlen);
+		s32 ret = ::setsockopt(s, level, optname, optval.get_ptr(), optlen);
 		*g_lastError = getLastError();
+
 		return ret;
 	}
 
 	s32 shutdown(s32 s, s32 how)
 	{
 		sys_net.Warning("shutdown(s=%d, how=%d)", s, how);
-		int ret = ::shutdown(s, how);
+		s = g_socketMap[s];
+
+		s32 ret = ::shutdown(s, how);
 		*g_lastError = getLastError();
+
 		return ret;
 	}
 
 	s32 socket(s32 family, s32 type, s32 protocol)
 	{
 		sys_net.Warning("socket(family=%d, type=%d, protocol=%d)", family, type, protocol);
-		int ret = ::socket(family, type, protocol);
+
+		s32 sock = ::socket(family, type, protocol);
 		*g_lastError = getLastError();
-		return ret;
+
+		g_socketMap.push_back(sock);
+		return g_socketMap.size() - 1;
 	}
 
 	s32 socketclose(s32 s)
 	{
 		sys_net.Warning("socket(s=%d)", s);
+		s = g_socketMap[s];
+
 #ifdef _WIN32
 		int ret = ::closesocket(s);
 #else
@@ -335,20 +362,76 @@ namespace sys_net_func
 		return CELL_OK;
 	}
 
-	s32 socketselect()
+	s32 socketselect(s32 nfds, vm::ptr<sys_net_fd_set> readfds, vm::ptr<sys_net_fd_set> writefds, vm::ptr<sys_net_fd_set> exceptfds, vm::ptr<sys_net_timeval> timeout)
 	{
-		UNIMPLEMENTED_FUNC(sys_net);
+		sys_net.Warning("socketselect(nfds=%d, readfds=*0x%x, writefds=*0x%x, exceptfds=*0x%x, timeout=*0x%x)", nfds, readfds, writefds, exceptfds, timeout);
+
+		timeval _timeout;
+
+		if (timeout)
+		{
+			_timeout.tv_sec = timeout->tv_sec;
+			_timeout.tv_usec = timeout->tv_usec;
+		}
+
+		//sys_net.Error("timeval: %d . %d", _timeout.tv_sec, _timeout.tv_usec);
+
+		fd_set _readfds;
+		fd_set _writefds;
+		fd_set _exceptfds;
+
+		// Copy the fd_sets to native ones
+
+		FD_ZERO(&_readfds);
+		FD_ZERO(&_writefds);
+		FD_ZERO(&_exceptfds);
+
+		auto copy_fdset = [](fd_set *set, vm::ptr<sys_net_fd_set> src)
+		{
+			if (src)
+			{
+				// Go through the bit set fds_bits and calculate the
+				// socket FDs from it, setting it in the native fd-set.
+
+				for (int i = 0; i < 32; i++)
+				{
+					for (int bit = 0; bit < 32; bit++)
+					{
+						if (src->fds_bits[i] & (1 << bit))
+						{
+							u32 sock = (i << 5) | bit;
+							//sys_net.Error("setting: fd %d", sock);
+							FD_SET(g_socketMap[sock], set);
+						}
+					}
+				}
+			}
+		};
+
+		copy_fdset(&_readfds, readfds);
+		copy_fdset(&_writefds, writefds);
+		copy_fdset(&_exceptfds, exceptfds);
+
+		s32 ret = ::select(nfds, &_readfds, &_writefds, &_exceptfds, timeout ? &_timeout : NULL);
+		*g_lastError = getLastError();
+
+		if (getLastError() >= 0)
+		{
+			sys_net.Error("socketselect(): error %d", getLastError());
+		}
+
+		//return ret;
 		return CELL_OK;
 	}
 }
 
 s32 sys_net_initialize_network_ex(vm::ptr<sys_net_initialize_parameter> param)
 {
-	sys_net.Warning("sys_net_initialize_network_ex(param_addr=0x%x)", param.addr());
-	g_lastError = vm::ptr<s32>::make((u32)Memory.Alloc(4, 1));
+	sys_net.Warning("sys_net_initialize_network_ex(param=*0x%x)", param);
+	g_lastError = vm::ptr<s32>::make(vm::alloc(4, vm::main));
 #ifdef _WIN32
 	WSADATA wsaData;
-	WORD wVersionRequested = MAKEWORD(1, 1);
+	WORD wVersionRequested = MAKEWORD(2, 2);
 	WSAStartup(wVersionRequested, &wsaData);
 #endif
 	return CELL_OK;
@@ -477,8 +560,8 @@ s32 sys_net_show_ifconfig()
 s32 sys_net_finalize_network()
 {
 	sys_net.Warning("sys_net_initialize_network_ex()");
-	Memory.Free(g_lastError.addr());
-	g_lastError = vm::ptr<s32>::make(0);
+	vm::dealloc(g_lastError.addr(), vm::main);
+	g_lastError = vm::null;
 #ifdef _WIN32
 	WSACleanup();
 #endif

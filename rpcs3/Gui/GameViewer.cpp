@@ -1,7 +1,7 @@
 #include "stdafx_gui.h"
 #include "Utilities/AutoPause.h"
 #include "Utilities/Log.h"
-#include "Utilities/rFile.h"
+//#include "Utilities/File.h"
 #include "Emu/Memory/Memory.h"
 #include "Emu/System.h"
 #include "Emu/FS/VFS.h"
@@ -40,14 +40,14 @@ public:
 class WxDirDeleteTraverser : public wxDirTraverser
 {
 public:
-	virtual wxDirTraverseResult OnFile(const wxString& filename)
+	virtual wxDirTraverseResult OnFile(const wxString& filename) override
 	{
 		if (!wxRemoveFile(filename)){
 			LOG_ERROR(HLE, "Couldn't delete File: %s", fmt::ToUTF8(filename).c_str());
 		}
 		return wxDIR_CONTINUE;
 	}
-	virtual wxDirTraverseResult OnDir(const wxString& dirname)
+	virtual wxDirTraverseResult OnDir(const wxString& dirname) override
 	{
 		wxDir dir(dirname);
 		dir.Traverse(*this);
@@ -106,23 +106,15 @@ void GameViewer::OnColClick(wxListEvent& event)
 
 void GameViewer::LoadGames()
 {
-	vfsDir dir(m_path);
-	LOG_NOTICE(HLE, "path: %s", m_path.c_str());
-	if(!dir.IsOpened()) return;
-
 	m_games.clear();
 
-	for(const DirEntryInfo* info : dir)
+	for (const auto info : vfsDir(m_path))
 	{
 		if(info->flags & DirEntry_TypeDir)
 		{
 			m_games.push_back(info->name);
 		}
 	}
-	dir.Close();
-
-	//ConLog.Write("path: %s", m_path.wx_str());
-	//ConLog.Write("folders count: %d", m_games.GetCount());
 }
 
 void GameViewer::LoadPSF()
@@ -130,23 +122,27 @@ void GameViewer::LoadPSF()
 	m_game_data.clear();
 	for(uint i=0; i<m_games.size(); ++i)
 	{
+		const std::string sfb = m_path + m_games[i] + "/PS3_DISC.SFB"; 
+		const std::string sfo = m_path + m_games[i] + (Emu.GetVFS().ExistsFile(sfb) ? "/PS3_GAME/PARAM.SFO" : "/PARAM.SFO");
+
+		if (!Emu.GetVFS().ExistsFile(sfo))
+		{
+			continue;
+		}
+
 		vfsFile f;
-		std::string sfo;
-		std::string sfb;
 
-		sfb = m_path + m_games[i] + "/PS3_DISC.SFB"; 
-
-		if (!f.Open(sfb))
-			sfo = m_path + m_games[i] + "/PARAM.SFO";
-		else
-			sfo = m_path + m_games[i] + "/PS3_GAME/PARAM.SFO";
-
-		if(!f.Open(sfo))
+		if (!f.Open(sfo))
+		{
 			continue;
+		}
 
-		PSFLoader psf(f);
-		if(!psf.Load(false))
+		const PSFLoader psf(f);
+
+		if (!psf)
+		{
 			continue;
+		}
 
 		// get local path from VFS...
 		std::string local_path;

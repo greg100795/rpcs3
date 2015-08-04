@@ -2,235 +2,314 @@
 #include "Emu/Memory/Memory.h"
 #include "Emu/System.h"
 #include "Emu/SysCalls/SysCalls.h"
-#include "Emu/SysCalls/CB_FUNC.h"
+#include "Emu/IdManager.h"
+#include "Emu/DbgCommand.h"
 
-#include "Emu/CPU/CPUThreadManager.h"
 #include "Emu/Cell/PPUThread.h"
+#include "sys_mutex.h"
 #include "sys_ppu_thread.h"
 
 SysCallBase sys_ppu_thread("sys_ppu_thread");
 
-void ppu_thread_exit(PPUThread& CPU, u64 errorcode)
+void _sys_ppu_thread_exit(PPUThread& ppu, u64 errorcode)
 {
-	CPU.SetExitStatus(errorcode);
-	CPU.Stop();
+	sys_ppu_thread.Log("_sys_ppu_thread_exit(errorcode=0x%llx)", errorcode);
 
-	if (!CPU.IsJoinable())
+	LV2_LOCK;
+
+	// get all sys_mutex objects
+	for (auto& mutex : Emu.GetIdManager().get_all<lv2_mutex_t>())
 	{
-		const u32 id = CPU.GetId();
-		CallAfter([id]()
+		// unlock mutex if locked by this thread
+		if (mutex->owner.get() == &ppu)
 		{
-			Emu.GetCPU().RemoveThread(id);
-		});
+			mutex->unlock(lv2_lock);
+		}
 	}
+
+	const auto thread = ppu.shared_from_this();
+
+	if (!ppu.is_joinable)
+	{
+		Emu.GetIdManager().remove<PPUThread>(ppu.get_id());
+	}
+
+	ppu.exit();
 }
 
-void sys_ppu_thread_exit(PPUThread& CPU, u64 errorcode)
-{
-	sys_ppu_thread.Log("sys_ppu_thread_exit(0x%llx)", errorcode);
-	
-	ppu_thread_exit(CPU, errorcode);
-}
-
-void sys_internal_ppu_thread_exit(PPUThread& CPU, u64 errorcode)
-{
-	sys_ppu_thread.Warning("sys_internal_ppu_thread_exit(0x%llx)", errorcode);
-
-	ppu_thread_exit(CPU, errorcode);
-}
-
-s32 sys_ppu_thread_yield()
+void sys_ppu_thread_yield()
 {
 	sys_ppu_thread.Log("sys_ppu_thread_yield()");
-	// Note: Or do we actually want to yield?
-	std::this_thread::sleep_for(std::chrono::milliseconds(1)); // hack
-	return CELL_OK;
+
+	std::this_thread::yield();
 }
 
-s32 sys_ppu_thread_join(u64 thread_id, vm::ptr<u64> vptr)
+s32 sys_ppu_thread_join(PPUThread& ppu, u32 thread_id, vm::ptr<u64> vptr)
 {
-	sys_ppu_thread.Warning("sys_ppu_thread_join(thread_id=%lld, vptr_addr=0x%x)", thread_id, vptr.addr());
+	sys_ppu_thread.Warning("sys_ppu_thread_join(thread_id=0x%x, vptr=*0x%x)", thread_id, vptr);
 
-	std::shared_ptr<CPUThread> thr = Emu.GetCPU().GetThread(thread_id);
-	if (!thr) return
-		CELL_ESRCH;
+	LV2_LOCK;
 
-	while (thr->IsAlive())
+	const auto thread = Emu.GetIdManager().get<PPUThread>(thread_id);
+
+	if (!thread)
 	{
-		if (Emu.IsStopped())
-		{
-			sys_ppu_thread.Warning("sys_ppu_thread_join(%d) aborted", thread_id);
-			return CELL_OK;
-		}
-		std::this_thread::sleep_for(std::chrono::milliseconds(1)); // hack
+		return CELL_ESRCH;
 	}
 
-	*vptr = thr->GetExitStatus();
-	Emu.GetCPU().RemoveThread(thread_id);
-	return CELL_OK;
-}
-
-s32 sys_ppu_thread_detach(u64 thread_id)
-{
-	sys_ppu_thread.Todo("sys_ppu_thread_detach(thread_id=%lld)", thread_id);
-
-	std::shared_ptr<CPUThread> thr = Emu.GetCPU().GetThread(thread_id);
-	if (!thr)
-		return CELL_ESRCH;
-
-	if (!thr->IsJoinable())
+	if (!thread->is_joinable || thread->is_joining)
+	{
 		return CELL_EINVAL;
-	thr->SetJoinable(false);
-
-	return CELL_OK;
-}
-
-void sys_ppu_thread_get_join_state(PPUThread& CPU, vm::ptr<s32> isjoinable)
-{
-	sys_ppu_thread.Warning("sys_ppu_thread_get_join_state(isjoinable_addr=0x%x)", isjoinable.addr());
-
-	*isjoinable = CPU.IsJoinable();
-}
-
-s32 sys_ppu_thread_set_priority(u64 thread_id, s32 prio)
-{
-	sys_ppu_thread.Log("sys_ppu_thread_set_priority(thread_id=%lld, prio=%d)", thread_id, prio);
-
-	std::shared_ptr<CPUThread> thr = Emu.GetCPU().GetThread(thread_id);
-	if (!thr)
-		return CELL_ESRCH;
-
-	thr->SetPrio(prio);
-
-	return CELL_OK;
-}
-
-s32 sys_ppu_thread_get_priority(u64 thread_id, u32 prio_addr)
-{
-	sys_ppu_thread.Log("sys_ppu_thread_get_priority(thread_id=%lld, prio_addr=0x%x)", thread_id, prio_addr);
-
-	std::shared_ptr<CPUThread> thr = Emu.GetCPU().GetThread(thread_id);
-	if(!thr) return CELL_ESRCH;
-
-	vm::write32(prio_addr, (s32)thr->GetPrio());
-
-	return CELL_OK;
-}
-
-s32 sys_ppu_thread_get_stack_information(PPUThread& CPU, u32 info_addr)
-{
-	sys_ppu_thread.Log("sys_ppu_thread_get_stack_information(info_addr=0x%x)", info_addr);
-
-	vm::write32(info_addr, (u32)CPU.GetStackAddr());
-	vm::write32(info_addr + 4, CPU.GetStackSize());
-
-	return CELL_OK;
-}
-
-s32 sys_ppu_thread_stop(u64 thread_id)
-{
-	sys_ppu_thread.Warning("sys_ppu_thread_stop(thread_id=%lld)", thread_id);
-
-	std::shared_ptr<CPUThread> thr = Emu.GetCPU().GetThread(thread_id);
-	if (!thr)
-		return CELL_ESRCH;
-
-	thr->Stop();
-
-	return CELL_OK;
-}
-
-s32 sys_ppu_thread_restart(u64 thread_id)
-{
-	sys_ppu_thread.Warning("sys_ppu_thread_restart(thread_id=%lld)", thread_id);
-
-	std::shared_ptr<CPUThread> thr = Emu.GetCPU().GetThread(thread_id);
-	if (!thr)
-		return CELL_ESRCH;
-
-	thr->Stop();
-	thr->Run();
-
-	return CELL_OK;
-}
-
-u32 ppu_thread_create(u32 entry, u64 arg, s32 prio, u32 stacksize, bool is_joinable, bool is_interrupt, std::string name, std::function<void(PPUThread&)> task)
-{
-	auto new_thread = Emu.GetCPU().AddThread(CPU_THREAD_PPU);
-
-	auto& ppu = static_cast<PPUThread&>(*new_thread);
-
-	ppu.SetEntry(entry);
-	ppu.SetPrio(prio);
-	ppu.SetStackSize(stacksize < 0x4000 ? 0x4000 : stacksize); // (hack) adjust minimal stack size
-	ppu.SetJoinable(is_joinable);
-	ppu.SetName(name);
-	ppu.custom_task = task;
-	ppu.Run();
-
-	if (!is_interrupt)
-	{
-		ppu.GPR[3] = arg;
-		ppu.Exec();
 	}
 
-	return ppu.GetId();
+	if (&ppu == thread.get())
+	{
+		return CELL_EDEADLK;
+	}
+
+	// mark joining
+	thread->is_joining = true;
+
+	// join thread
+	while (thread->is_alive())
+	{
+		CHECK_EMU_STATUS;
+
+		ppu.cv.wait_for(lv2_lock, std::chrono::milliseconds(1));
+	}
+
+	// get exit status from the register
+	*vptr = thread->GPR[3];
+
+	// cleanup
+	Emu.GetIdManager().remove<PPUThread>(thread->get_id());
+
+	return CELL_OK;
 }
 
-s32 sys_ppu_thread_create(vm::ptr<u64> thread_id, u32 entry, u64 arg, s32 prio, u32 stacksize, u64 flags, vm::ptr<const char> threadname)
+s32 sys_ppu_thread_detach(u32 thread_id)
 {
-	sys_ppu_thread.Warning("sys_ppu_thread_create(thread_id=*0x%x, entry=0x%x, arg=0x%llx, prio=%d, stacksize=0x%x, flags=0x%llx, threadname=*0x%x)", thread_id, entry, arg, prio, stacksize, flags, threadname);
+	sys_ppu_thread.Warning("sys_ppu_thread_detach(thread_id=0x%x)", thread_id);
+
+	LV2_LOCK;
+
+	const auto thread = Emu.GetIdManager().get<PPUThread>(thread_id);
+
+	if (!thread)
+	{
+		return CELL_ESRCH;
+	}
+
+	if (!thread->is_joinable)
+	{
+		return CELL_EINVAL;
+	}
+
+	if (thread->is_joining)
+	{
+		return CELL_EBUSY;
+	}
+
+	// "detach"
+	thread->is_joinable = false;
+
+	return CELL_OK;
+}
+
+void sys_ppu_thread_get_join_state(PPUThread& ppu, vm::ptr<s32> isjoinable)
+{
+	sys_ppu_thread.Warning("sys_ppu_thread_get_join_state(isjoinable=*0x%x)", isjoinable);
+
+	LV2_LOCK;
+
+	*isjoinable = ppu.is_joinable;
+}
+
+s32 sys_ppu_thread_set_priority(u32 thread_id, s32 prio)
+{
+	sys_ppu_thread.Log("sys_ppu_thread_set_priority(thread_id=0x%x, prio=%d)", thread_id, prio);
+
+	LV2_LOCK;
+
+	const auto thread = Emu.GetIdManager().get<PPUThread>(thread_id);
+
+	if (!thread)
+	{
+		return CELL_ESRCH;
+	}
 
 	if (prio < 0 || prio > 3071)
 	{
 		return CELL_EINVAL;
 	}
 
-	bool is_joinable = flags & SYS_PPU_THREAD_CREATE_JOINABLE;
-	bool is_interrupt = flags & SYS_PPU_THREAD_CREATE_INTERRUPT;
+	thread->prio = prio;
+
+	return CELL_OK;
+}
+
+s32 sys_ppu_thread_get_priority(u32 thread_id, vm::ptr<s32> priop)
+{
+	sys_ppu_thread.Log("sys_ppu_thread_get_priority(thread_id=0x%x, priop=*0x%x)", thread_id, priop);
+
+	LV2_LOCK;
+
+	const auto thread = Emu.GetIdManager().get<PPUThread>(thread_id);
+
+	if (!thread)
+	{
+		return CELL_ESRCH;
+	}
+
+	*priop = thread->prio;
+
+	return CELL_OK;
+}
+
+s32 sys_ppu_thread_get_stack_information(PPUThread& ppu, vm::ptr<sys_ppu_thread_stack_t> sp)
+{
+	sys_ppu_thread.Log("sys_ppu_thread_get_stack_information(sp=*0x%x)", sp);
+
+	sp->pst_addr = ppu.stack_addr;
+	sp->pst_size = ppu.stack_size;
+
+	return CELL_OK;
+}
+
+s32 sys_ppu_thread_stop(u32 thread_id)
+{
+	sys_ppu_thread.Todo("sys_ppu_thread_stop(thread_id=0x%x)", thread_id);
+
+	LV2_LOCK;
+
+	const auto thread = Emu.GetIdManager().get<PPUThread>(thread_id);
+
+	if (!thread)
+	{
+		return CELL_ESRCH;
+	}
+
+	//t->Stop();
+
+	return CELL_OK;
+}
+
+s32 sys_ppu_thread_restart(u32 thread_id)
+{
+	sys_ppu_thread.Todo("sys_ppu_thread_restart(thread_id=0x%x)", thread_id);
+
+	LV2_LOCK;
+
+	const auto thread = Emu.GetIdManager().get<PPUThread>(thread_id);
+
+	if (!thread)
+	{
+		return CELL_ESRCH;
+	}
+
+	//t->Stop();
+	//t->Run();
+
+	return CELL_OK;
+}
+
+u32 ppu_thread_create(u32 entry, u64 arg, s32 prio, u32 stacksize, bool is_joinable, bool is_interrupt, std::string name, std::function<void(PPUThread&)> task)
+{
+	const auto ppu = Emu.GetIdManager().make_ptr<PPUThread>(name);
+
+	ppu->prio = prio;
+	ppu->stack_size = stacksize < 0x4000 ? 0x4000 : stacksize; // (hack) adjust minimal stack size
+	ppu->custom_task = task;
+	ppu->run();
+
+	if (entry)
+	{
+		ppu->PC = vm::read32(entry);
+		ppu->GPR[2] = vm::read32(entry + 4); // rtoc
+	}
+
+	if (!is_interrupt)
+	{
+		ppu->GPR[3] = arg;
+		ppu->exec();
+	}
+
+	return ppu->get_id();
+}
+
+s32 _sys_ppu_thread_create(vm::ptr<u64> thread_id, vm::ptr<ppu_thread_param_t> param, u64 arg, u64 unk, s32 prio, u32 stacksize, u64 flags, vm::cptr<char> threadname)
+{
+	sys_ppu_thread.Warning("_sys_ppu_thread_create(thread_id=*0x%x, param=*0x%x, arg=0x%llx, unk=0x%llx, prio=%d, stacksize=0x%x, flags=0x%llx, threadname=*0x%x)",
+		thread_id, param, arg, unk, prio, stacksize, flags, threadname);
+
+	LV2_LOCK;
+
+	if (prio < 0 || prio > 3071)
+	{
+		return CELL_EINVAL;
+	}
+
+	const bool is_joinable = (flags & SYS_PPU_THREAD_CREATE_JOINABLE) != 0;
+	const bool is_interrupt = (flags & SYS_PPU_THREAD_CREATE_INTERRUPT) != 0;
 
 	if (is_joinable && is_interrupt)
 	{
 		return CELL_EPERM;
 	}
 
-	*thread_id = ppu_thread_create(entry, arg, prio, stacksize, is_joinable, is_interrupt, threadname ? threadname.get_ptr() : "");
-	return CELL_OK;
-}
+	const auto ppu = Emu.GetIdManager().make_ptr<PPUThread>(threadname ? threadname.get_ptr() : "");
 
-std::mutex g_once_mutex;
+	ppu->prio = prio;
+	ppu->stack_size = stacksize < 0x4000 ? 0x4000 : stacksize; // (hack) adjust minimal stack size
+	ppu->run();
 
-void sys_ppu_thread_once(PPUThread& CPU, vm::ptr<atomic_t<u32>> once_ctrl, vm::ptr<void()> init)
-{
-	sys_ppu_thread.Warning("sys_ppu_thread_once(once_ctrl=*0x%x, init=*0x%x)", once_ctrl, init);
+	ppu->PC = vm::read32(param->entry);
+	ppu->GPR[2] = vm::read32(param->entry + 4); // rtoc
+	ppu->GPR[3] = arg;
+	ppu->GPR[4] = unk; // actually unknown
 
-	std::lock_guard<std::mutex> lock(g_once_mutex);
+	ppu->is_joinable = is_joinable;
 
-	if (once_ctrl->compare_and_swap_test(be_t<u32>::make(SYS_PPU_THREAD_ONCE_INIT), be_t<u32>::make(SYS_PPU_THREAD_DONE_INIT)))
+	if (u32 tls = param->tls) // hack
 	{
-		init(CPU);
+		ppu->GPR[13] = tls;
 	}
-}
 
-s32 sys_ppu_thread_get_id(PPUThread& CPU, vm::ptr<u64> thread_id)
-{
-	sys_ppu_thread.Log("sys_ppu_thread_get_id(thread_id_addr=0x%x)", thread_id.addr());
+	*thread_id = ppu->get_id();
 
-	*thread_id = CPU.GetId();
 	return CELL_OK;
 }
 
-s32 sys_ppu_thread_rename(u64 thread_id, vm::ptr<const char> name)
+s32 sys_ppu_thread_start(u32 thread_id)
 {
-	sys_ppu_thread.Log("sys_ppu_thread_rename(thread_id=0x%llx, name=*0x%x)", thread_id, name);
+	sys_ppu_thread.Warning("sys_ppu_thread_start(thread_id=0x%x)", thread_id);
 
-	std::shared_ptr<CPUThread> t = Emu.GetCPU().GetThread(thread_id, CPU_THREAD_PPU);
+	LV2_LOCK;
 
-	if (!t)
+	const auto thread = Emu.GetIdManager().get<PPUThread>(thread_id);
+
+	if (!thread)
 	{
 		return CELL_ESRCH;
 	}
-		
-	t->SetThreadName(name.get_ptr());
+
+	thread->exec();
+
+	return CELL_OK;
+}
+
+s32 sys_ppu_thread_rename(u32 thread_id, vm::cptr<char> name)
+{
+	sys_ppu_thread.Todo("sys_ppu_thread_rename(thread_id=0x%x, name=*0x%x)", thread_id, name);
+
+	LV2_LOCK;
+
+	const auto thread = Emu.GetIdManager().get<PPUThread>(thread_id);
+
+	if (!thread)
+	{
+		return CELL_ESRCH;
+	}
+
 	return CELL_OK;
 }

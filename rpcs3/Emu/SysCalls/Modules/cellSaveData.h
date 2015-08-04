@@ -1,5 +1,7 @@
 #pragma once
 
+namespace vm { using namespace ps3; }
+
 // Return codes
 enum
 {
@@ -85,6 +87,13 @@ enum
 	CELL_SAVEDATA_FILETYPE_CONTENT_ICON1  = 3,
 	CELL_SAVEDATA_FILETYPE_CONTENT_PIC1   = 4,
 	CELL_SAVEDATA_FILETYPE_CONTENT_SND0   = 5,
+
+	// reCreateMode
+	CELL_SAVEDATA_RECREATE_NO              = 0,
+	CELL_SAVEDATA_RECREATE_NO_NOBROKEN     = 1,
+	CELL_SAVEDATA_RECREATE_YES             = 2,
+	CELL_SAVEDATA_RECREATE_YES_RESET_OWNER = 3,
+	CELL_SAVEDATA_RECREATE_MASK            = 0xffff,
 };
 
 
@@ -167,22 +176,22 @@ struct CellSaveDataSystemFileParam
 
 struct CellSaveDataDirStat
 { 
-	be_t<s64> st_atime_;
-	be_t<s64> st_mtime_;
-	be_t<s64> st_ctime_;
+	be_t<s64> atime;
+	be_t<s64> mtime;
+	be_t<s64> ctime;
 	char dirName[CELL_SAVEDATA_DIRNAME_SIZE]; 
 };
 
 struct CellSaveDataFileStat
 { 
 	be_t<u32> fileType;
-	u8 reserved1[4];
-	be_t<u64> st_size;
-	be_t<s64> st_atime_;
-	be_t<s64> st_mtime_;
-	be_t<s64> st_ctime_;
+	char reserved1[4];
+	be_t<u64> size;
+	be_t<s64> atime;
+	be_t<s64> mtime;
+	be_t<s64> ctime;
 	char fileName[CELL_SAVEDATA_FILENAME_SIZE]; 
-	u8 reserved2[3];
+	char reserved2[3];
 };
 
 struct CellSaveDataStatGet
@@ -256,11 +265,11 @@ struct CellSaveDataDoneGet
 
 
 // Callback Functions
-typedef void(CellSaveDataFixedCallback)(vm::ptr<CellSaveDataCBResult> cbResult, vm::ptr<CellSaveDataListGet> get, vm::ptr<CellSaveDataFixedSet> set);
-typedef void(CellSaveDataListCallback)(vm::ptr<CellSaveDataCBResult> cbResult, vm::ptr<CellSaveDataListGet> get, vm::ptr<CellSaveDataListSet> set);
-typedef void(CellSaveDataStatCallback)(vm::ptr<CellSaveDataCBResult> cbResult, vm::ptr<CellSaveDataStatGet> get, vm::ptr<CellSaveDataStatSet> set);
-typedef void(CellSaveDataFileCallback)(vm::ptr<CellSaveDataCBResult> cbResult, vm::ptr<CellSaveDataFileGet> get, vm::ptr<CellSaveDataFileSet> set);
-typedef void(CellSaveDataDoneCallback)(vm::ptr<CellSaveDataCBResult> cbResult, vm::ptr<CellSaveDataDoneGet> get);
+using CellSaveDataFixedCallback = void(vm::ptr<CellSaveDataCBResult> cbResult, vm::ptr<CellSaveDataListGet> get, vm::ptr<CellSaveDataFixedSet> set);
+using CellSaveDataListCallback = void(vm::ptr<CellSaveDataCBResult> cbResult, vm::ptr<CellSaveDataListGet> get, vm::ptr<CellSaveDataListSet> set);
+using CellSaveDataStatCallback = void(vm::ptr<CellSaveDataCBResult> cbResult, vm::ptr<CellSaveDataStatGet> get, vm::ptr<CellSaveDataStatSet> set);
+using CellSaveDataFileCallback = void(vm::ptr<CellSaveDataCBResult> cbResult, vm::ptr<CellSaveDataFileGet> get, vm::ptr<CellSaveDataFileSet> set);
+using CellSaveDataDoneCallback = void(vm::ptr<CellSaveDataCBResult> cbResult, vm::ptr<CellSaveDataDoneGet> get);
 
 
 // Auxiliary Structs
@@ -271,11 +280,23 @@ struct SaveDataEntry
 	std::string title;
 	std::string subtitle;
 	std::string details;
-	u32 sizeKB;
-	s64 st_atime_;
-	s64 st_mtime_;
-	s64 st_ctime_;
-	void* iconBuf;
-	u32 iconBufSize;
+	u64 size;
+	s64 atime;
+	s64 mtime;
+	s64 ctime;
+	//void* iconBuf;
+	//u32 iconBufSize;
 	bool isNew;
 };
+
+struct SaveDataDialogInstance
+{
+	std::mutex mutex;
+
+	SaveDataDialogInstance();
+	virtual ~SaveDataDialogInstance() = default;
+
+	virtual s32 ShowSaveDataList(std::vector<SaveDataEntry>& save_entries, s32 focused, vm::ptr<CellSaveDataListSet> listSet) = 0;
+};
+
+extern class Module cellSaveData;

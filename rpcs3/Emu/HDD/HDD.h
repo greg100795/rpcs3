@@ -32,7 +32,7 @@ enum vfsHDD_EntryType : u8
 struct vfsHDD_Entry : public vfsHDD_Block
 {
 	u64 data_block;
-	vfsOpenMode access;
+	u32 access;
 	vfsHDD_EntryType type;
 	u64 size;
 	u64 ctime;
@@ -82,7 +82,7 @@ class vfsHDDFile
 
 	void WriteEntry(u64 block, const vfsHDD_Entry& data, const std::string& name);
 
-	__forceinline u32 GetMaxNameLen() const
+	force_inline u32 GetMaxNameLen() const
 	{
 		return m_hdd_info.block_size - sizeof(vfsHDD_Entry);
 	}
@@ -108,6 +108,11 @@ public:
 	}
 
 	bool Seek(u64 pos);
+
+	u64 Tell() const
+	{
+		return m_cur_block * m_hdd_info.block_size + m_position; // ???
+	}
 
 	void SaveInfo();
 
@@ -144,7 +149,7 @@ class vfsHDD : public vfsFileBase
 public:
 	vfsHDD(vfsDevice* device, const std::string& hdd_path);
 
-	__forceinline u32 GetMaxNameLen() const
+	force_inline u32 GetMaxNameLen() const
 	{
 		return m_hdd_info.block_size - sizeof(vfsHDD_Entry);
 	}
@@ -153,7 +158,7 @@ public:
 
 	int OpenDir(const std::string& name);
 
-	bool Rename(const std::string& from, const std::string& to);
+	bool Rename(const std::string& from, const std::string& to) override;
 
 	u64 FindFreeBlock();
 
@@ -177,7 +182,7 @@ public:
 
 	bool GetNextEntry(u64& block, vfsHDD_Entry& entry, std::string& name);
 
-	virtual bool Open(const std::string& path, vfsOpenMode mode = vfsRead);
+	virtual bool Open(const std::string& path, u32 mode = vfsRead) override;
 
 	bool HasEntry(const std::string& name);
 
@@ -187,15 +192,17 @@ public:
 
 	bool RemoveEntry(const std::string& name);
 
-	virtual bool Create(const std::string& path);
+	virtual u64 Write(const void* src, u64 count) override;
 
-	virtual u32 Write(const void* src, u32 size);
+	virtual u64 Read(void* dst, u64 count) override;
 
-	virtual u32 Read(void* dst, u32 size);
+	virtual u64 Seek(s64 offset, u32 mode = from_begin) override;
 
-	virtual u64 Seek(s64 offset, vfsSeekMode mode = vfsSeekSet);
+	virtual u64 Tell() const override;
 
-	virtual bool Eof();
+	virtual bool Eof() const override;
 
-	virtual u64 GetSize();
+	virtual bool IsOpened() const override;
+
+	virtual u64 GetSize() const override;
 };

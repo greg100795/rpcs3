@@ -6,9 +6,6 @@
 #include "Emu/System.h"
 
 #include "MemoryStringSearcher.h"
-#include "Emu/RSX/sysutil_video.h"
-#include "Emu/RSX/GSManager.h"
-//#include "Emu/RSX/GCM.h"
 
 #include <wx/notebook.h>
 
@@ -44,7 +41,8 @@ void MemoryStringSearcher::Search(wxCommandEvent& event)
 	// Search the address space for the string
 	u32 strIndex = 0;
 	u32 numFound = 0;
-	for (u32 addr = Memory.MainMem.GetStartAddr(); addr < Memory.MainMem.GetEndAddr(); addr++) {
+	const auto area = vm::get(vm::main);
+	for (u32 addr = area->addr; addr < area->addr + area->size; addr++) {
 		if (!vm::check_addr(addr)) {
 			strIndex = 0;
 			continue;

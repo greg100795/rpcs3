@@ -1,9 +1,10 @@
 #pragma once
-#include "Modules.h"
+
+class Module;
 
 class ModuleManager
 {
-	bool initialized;
+	bool m_init = false;
 
 public:
 	ModuleManager();
@@ -11,7 +12,8 @@ public:
 
 	void Init();
 	void Close();
-	Module* GetModuleByName(const char* name);
-	Module* GetModuleById(u16 id);
-	bool CheckModuleId(u16 id);
+
+	static Module* GetModuleByName(const char* name);
+	static Module* GetModuleById(u16 id);
+	static bool CheckModuleId(u16 id);
 };

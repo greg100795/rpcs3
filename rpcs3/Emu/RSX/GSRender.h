@@ -3,8 +3,12 @@
 
 struct GSRender : public RSXThread
 {
-	virtual ~GSRender()
+	virtual ~GSRender() override
 	{
+		if (joinable())
+		{
+			throw EXCEPTION("Thread not joined");
+		}
 	}
 
 	virtual void Close()=0;
@@ -13,7 +17,6 @@ struct GSRender : public RSXThread
 enum GSLockType
 {
 	GS_LOCK_NOT_WAIT,
-	GS_LOCK_WAIT_FLUSH,
 	GS_LOCK_WAIT_FLIP,
 };
 

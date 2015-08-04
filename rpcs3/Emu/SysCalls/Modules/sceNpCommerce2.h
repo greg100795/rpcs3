@@ -1,4 +1,7 @@
 #pragma once
+
+namespace vm { using namespace ps3; }
+
 #include "cellRtc.h"
 
 // Return codes
@@ -138,7 +141,7 @@ struct SceNpCommerce2CommonData
 	be_t<u32> data;
 	be_t<u32> data_size;
 	be_t<u32> data2;
-	//be_t<u32> reserved[4];
+	be_t<u32> reserved[4];
 };
 
 // Structure indicating the range of results obtained
@@ -156,12 +159,12 @@ struct SceNpCommerce2SessionInfo
 	be_t<u32> decimals;
 	s8 currencySymbol[SCE_NP_COMMERCE2_CURRENCY_SYMBOL_LEN + 1];
 	be_t<u32> symbolPosition;
-	bool symbolWithSpace;
+	b8 symbolWithSpace;
 	u8 padding1[3];
 	s8 thousandSeparator[SCE_NP_COMMERCE2_THOUSAND_SEPARATOR_LEN + 1];
 	s8 decimalLetter[SCE_NP_COMMERCE2_DECIMAL_LETTER_LEN + 1];
 	u8 padding2[1];
-	//be_t<u32> reserved[4];
+	be_t<u32> reserved[4];
 };
 
 // Structure for category information
@@ -244,14 +247,14 @@ struct SceNpCommerce2GameSkuInfo
 	be_t<u32> timeUntilExpiration;
 	be_t<u32> purchasabilityFlag;
 	be_t<u32> annotation;
-	bool downloadable;
+	b8 downloadable;
 	u8 padding[3];
 	be_t<u32> price;
 	s8 skuName;
 	s8 productId;
 	s8 contentLinkUrl;
 	be_t<u32> countOfRewardInfo;
-	//be_t<u32> reserved[8];
+	be_t<u32> reserved[8];
 };
 
 // Structure of parameters for in-game product browsing
@@ -266,11 +269,11 @@ struct SceNpCommerce2ProductCodeParam
 	be_t<u32> size;
 	be_t<u32> inputMode; // Unsigned ints go into be_t<u32>, right?
 	s8 code1[SCE_NP_COMMERCE2_PRODUCT_CODE_BLOCK_LEN + 1];
-	//s8 padding1[3];
+	s8 padding1[3];
 	s8 code2[SCE_NP_COMMERCE2_PRODUCT_CODE_BLOCK_LEN + 1];
-	//s8 padding2[3];
+	s8 padding2[3];
 	s8 code3[SCE_NP_COMMERCE2_PRODUCT_CODE_BLOCK_LEN + 1];
-	//s8 padding3[3];
+	s8 padding3[3];
 };
 
-typedef void(*SceNpCommerce2Handler)(u32 ctx_id, u32 subject_id, s32 event, s32 error_code, u32 arg);
+using SceNpCommerce2Handler = void(u32 ctx_id, u32 subject_id, s32 event, s32 error_code, vm::ptr<void> arg);

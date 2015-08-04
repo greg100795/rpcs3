@@ -1,5 +1,7 @@
 #pragma once
 
+namespace vm { using namespace ps3; }
+
 // Return codes
 enum
 {
@@ -108,8 +110,7 @@ enum
 };
 
 // Request handle for clan API
-struct SceNpClansRequest;
-typedef vm::ptr<SceNpClansRequest> SceNpClansRequestHandle;
+using SceNpClansRequestHandle = vm::ptr<struct SceNpClansRequest>;
 
 // Paging request structure
 struct SceNpClansPagingRequest
@@ -132,7 +133,7 @@ struct SceNpClansClanBasicInfo
 	be_t<u32> numMembers;
 	s8 name[SCE_NP_CLANS_CLAN_NAME_MAX_LENGTH + 1];
 	s8 tag[SCE_NP_CLANS_CLAN_TAG_MAX_LENGTH + 1];
-	//u8 reserved[2];
+	u8 reserved[2];
 };
 
 // Clan entry structure
@@ -141,8 +142,8 @@ struct SceNpClansEntry
 	SceNpClansClanBasicInfo info;
 	be_t<u32> role;
 	be_t<s32> status;
-	bool allowMsg;
-	//u8 reserved[3];
+	b8 allowMsg;
+	u8 reserved[3];
 };
 
 // Clan search attribute structure
@@ -153,7 +154,7 @@ struct SceNpClansSearchableAttr
 	be_t<u32> intAttr2;
 	be_t<u32> intAttr3;
 	u8 binAttr1[SCE_NP_CLANS_CLAN_BINARY_ATTRIBUTE1_MAX_SIZE];
-	//u8 reserved[2];
+	u8 reserved[2];
 };
 
 // Clan search profile structure
@@ -169,7 +170,7 @@ struct SceNpClansSearchableProfile
 	be_t<s32> intAttr3SearchOp;
 	be_t<s32> binAttr1SearchOp;
 	s8 tag[SCE_NP_CLANS_CLAN_TAG_MAX_LENGTH + 1];
-	//u8 reserved[3];
+	u8 reserved[3];
 };
 
 // Clan search name structure
@@ -177,7 +178,7 @@ struct SceNpClansSearchableName
 {
 	be_t<s32> nameSearchOp;
 	s8 name[SCE_NP_CLANS_CLAN_NAME_MAX_LENGTH + 1];
-	//u8 reserved[3];
+	u8 reserved[3];
 };
 
 // Updatable clan information structure
@@ -206,8 +207,8 @@ struct SceNpClansUpdatableMemberInfo
 	be_t<u32> binData1Size;
 	u8 binAttr1[SCE_NP_CLANS_CLAN_BINARY_ATTRIBUTE1_MAX_SIZE + 1];
 	s8 description[SCE_NP_CLANS_MEMBER_DESCRIPTION_MAX_LENGTH + 1];
-	bool allowMsg;
-	//u8 reserved[3];
+	b8 allowMsg;
+	u8 reserved[3];
 };
 
 // Member entry structure

@@ -2,42 +2,43 @@
 
 #include <emmintrin.h>
 
-#ifdef _WIN32
+// temporarily (until noexcept is available); use `noexcept(true)` instead of `noexcept` if necessary
+#if defined(_MSC_VER) && _MSC_VER <= 1800
+#define noexcept _NOEXCEPT_OP
+#endif
+
+#if defined(_MSC_VER) && _MSC_VER <= 1800
 #define thread_local __declspec(thread)
 #elif __APPLE__
 #define thread_local __thread
 #endif
 
-#ifdef _WIN32
-#define __noinline __declspec(noinline)
+#if defined(_MSC_VER)
+#define never_inline __declspec(noinline)
 #else
-#define __noinline __attribute__((noinline))
+#define never_inline __attribute__((noinline))
 #endif
 
-#ifdef _WIN32
-#define __safebuffers __declspec(safebuffers)
+#if defined(_MSC_VER)
+#define safe_buffers __declspec(safebuffers)
 #else
-#define __safebuffers
+#define safe_buffers
 #endif
 
-template<size_t size>
-void strcpy_trunc(char(&dst)[size], const std::string& src)
-{
-	const size_t count = (src.size() >= size) ? size - 1 /* truncation */ : src.size();
-	memcpy(dst, src.c_str(), count);
-	dst[count] = 0;
-}
+#if defined(_MSC_VER)
+#define force_inline __forceinline
+#else
+#define force_inline __attribute__((always_inline))
+#endif
 
-template<size_t size, size_t rsize>
-void strcpy_trunc(char(&dst)[size], const char(&src)[rsize])
-{
-	const size_t count = (rsize >= size) ? size - 1 /* truncation */ : rsize;
-	memcpy(dst, src, count);
-	dst[count] = 0;
-}
+#if defined(_MSC_VER)
+#define set_alignment(x) _CRT_ALIGN(x)
+#else
+#define set_alignment(x) __attribute__((aligned(x)))
+#endif
 
 #if defined(__GNUG__)
-#include <cmath>
+
 #include <stdlib.h>
 #include <cstdint>
 
@@ -46,12 +47,10 @@ void strcpy_trunc(char(&dst)[size], const char(&src)[rsize])
 #endif
 
 #define _fpclass(x) std::fpclassify(x)
-#define __forceinline __attribute__((always_inline))
 #define _byteswap_ushort(x) __builtin_bswap16(x)
 #define _byteswap_ulong(x) __builtin_bswap32(x)
 #define _byteswap_uint64(x) __builtin_bswap64(x)
 #define INFINITE 0xFFFFFFFF
-#define _CRT_ALIGN(x) __attribute__((aligned(x)))
 
 inline uint64_t __umulh(uint64_t a, uint64_t b)
 {
@@ -67,10 +66,8 @@ inline int64_t  __mulh(int64_t a, int64_t b)
 	return result;
 }
 
-
-void * _aligned_malloc(size_t size, size_t alignment);
-
 #ifdef __APPLE__
+
 int clock_gettime(int foo, struct timespec *ts);
 #define wxIsNaN(x) ((x) != (x))
 
@@ -80,220 +77,227 @@ int clock_gettime(int foo, struct timespec *ts);
 
 #endif /* __APPLE__ */
 
-#define _aligned_free free
-
-#define DWORD int32_t
-#endif
-
-#ifndef InterlockedCompareExchange
-static __forceinline uint8_t InterlockedCompareExchange(volatile uint8_t* dest, uint8_t exch, uint8_t comp)
+template<typename T, typename T2> inline std::enable_if_t<std::is_arithmetic<T>::value, T> sync_val_compare_and_swap(volatile T* dest, T2 comp, T2 exch)
 {
-#if defined(__GNUG__)
 	return __sync_val_compare_and_swap(dest, comp, exch);
-#else
+}
+
+template<typename T, typename T2> inline std::enable_if_t<std::is_arithmetic<T>::value, bool> sync_bool_compare_and_swap(volatile T* dest, T2 comp, T2 exch)
+{
+	return __sync_bool_compare_and_swap(dest, comp, exch);
+}
+
+template<typename T, typename T2> inline std::enable_if_t<std::is_arithmetic<T>::value, T> sync_lock_test_and_set(volatile T* dest, T2 value)
+{
+	return __sync_lock_test_and_set(dest, value);
+}
+
+template<typename T, typename T2> inline std::enable_if_t<std::is_arithmetic<T>::value, T> sync_fetch_and_add(volatile T* dest, T2 value)
+{
+	return __sync_fetch_and_add(dest, value);
+}
+
+template<typename T, typename T2> inline std::enable_if_t<std::is_arithmetic<T>::value, T> sync_fetch_and_sub(volatile T* dest, T2 value)
+{
+	return __sync_fetch_and_sub(dest, value);
+}
+
+template<typename T, typename T2> inline std::enable_if_t<std::is_arithmetic<T>::value, T> sync_fetch_and_or(volatile T* dest, T2 value)
+{
+	return __sync_fetch_and_or(dest, value);
+}
+
+template<typename T, typename T2> inline std::enable_if_t<std::is_arithmetic<T>::value, T> sync_fetch_and_and(volatile T* dest, T2 value)
+{
+	return __sync_fetch_and_and(dest, value);
+}
+
+template<typename T, typename T2> inline std::enable_if_t<std::is_arithmetic<T>::value, T> sync_fetch_and_xor(volatile T* dest, T2 value)
+{
+	return __sync_fetch_and_xor(dest, value);
+}
+
+#endif /* __GNUG__ */
+
+#if defined(_MSC_VER)
+
+// atomic compare and swap functions
+
+inline uint8_t sync_val_compare_and_swap(volatile uint8_t* dest, uint8_t comp, uint8_t exch)
+{
 	return _InterlockedCompareExchange8((volatile char*)dest, exch, comp);
-#endif
 }
-static __forceinline uint16_t InterlockedCompareExchange(volatile uint16_t* dest, uint16_t exch, uint16_t comp)
+
+inline uint16_t sync_val_compare_and_swap(volatile uint16_t* dest, uint16_t comp, uint16_t exch)
 {
-#if defined(__GNUG__)
-	return __sync_val_compare_and_swap(dest, comp, exch);
-#else
 	return _InterlockedCompareExchange16((volatile short*)dest, exch, comp);
-#endif
 }
-static __forceinline uint32_t InterlockedCompareExchange(volatile uint32_t* dest, uint32_t exch, uint32_t comp)
+
+inline uint32_t sync_val_compare_and_swap(volatile uint32_t* dest, uint32_t comp, uint32_t exch)
 {
-#if defined(__GNUG__)
-	return __sync_val_compare_and_swap(dest, comp, exch);
-#else
 	return _InterlockedCompareExchange((volatile long*)dest, exch, comp);
-#endif
 }
-static __forceinline uint64_t InterlockedCompareExchange(volatile uint64_t* dest, uint64_t exch, uint64_t comp)
+
+inline uint64_t sync_val_compare_and_swap(volatile uint64_t* dest, uint64_t comp, uint64_t exch)
 {
-#if defined(__GNUG__)
-	return __sync_val_compare_and_swap(dest, comp, exch);
-#else
 	return _InterlockedCompareExchange64((volatile long long*)dest, exch, comp);
-#endif
 }
-#endif
 
-static __forceinline bool InterlockedCompareExchangeTest(volatile uint8_t* dest, uint8_t exch, uint8_t comp)
+inline bool sync_bool_compare_and_swap(volatile uint8_t* dest, uint8_t comp, uint8_t exch)
 {
-#if defined(__GNUG__)
-	return __sync_bool_compare_and_swap(dest, comp, exch);
-#else
 	return (uint8_t)_InterlockedCompareExchange8((volatile char*)dest, exch, comp) == comp;
-#endif
 }
-static __forceinline bool InterlockedCompareExchangeTest(volatile uint16_t* dest, uint16_t exch, uint16_t comp)
+
+inline bool sync_bool_compare_and_swap(volatile uint16_t* dest, uint16_t comp, uint16_t exch)
 {
-#if defined(__GNUG__)
-	return __sync_bool_compare_and_swap(dest, comp, exch);
-#else
 	return (uint16_t)_InterlockedCompareExchange16((volatile short*)dest, exch, comp) == comp;
-#endif
 }
-static __forceinline bool InterlockedCompareExchangeTest(volatile uint32_t* dest, uint32_t exch, uint32_t comp)
+
+inline bool sync_bool_compare_and_swap(volatile uint32_t* dest, uint32_t comp, uint32_t exch)
 {
-#if defined(__GNUG__)
-	return __sync_bool_compare_and_swap(dest, comp, exch);
-#else
 	return (uint32_t)_InterlockedCompareExchange((volatile long*)dest, exch, comp) == comp;
-#endif
 }
-static __forceinline bool InterlockedCompareExchangeTest(volatile uint64_t* dest, uint64_t exch, uint64_t comp)
+
+inline bool sync_bool_compare_and_swap(volatile uint64_t* dest, uint64_t comp, uint64_t exch)
 {
-#if defined(__GNUG__)
-	return __sync_bool_compare_and_swap(dest, comp, exch);
-#else
 	return (uint64_t)_InterlockedCompareExchange64((volatile long long*)dest, exch, comp) == comp;
-#endif
 }
 
-#ifndef InterlockedExchange
-static __forceinline uint8_t InterlockedExchange(volatile uint8_t* dest, uint8_t value)
+// atomic exchange functions
+
+inline uint8_t sync_lock_test_and_set(volatile uint8_t* dest, uint8_t value)
 {
-#if defined(__GNUG__)
-	return __sync_lock_test_and_set(dest, value);
-#else
 	return _InterlockedExchange8((volatile char*)dest, value);
-#endif
 }
-static __forceinline uint16_t InterlockedExchange(volatile uint16_t* dest, uint16_t value)
+
+inline uint16_t sync_lock_test_and_set(volatile uint16_t* dest, uint16_t value)
 {
-#if defined(__GNUG__)
-	return __sync_lock_test_and_set(dest, value);
-#else
 	return _InterlockedExchange16((volatile short*)dest, value);
-#endif
 }
-static __forceinline uint32_t InterlockedExchange(volatile uint32_t* dest, uint32_t value)
+
+inline uint32_t sync_lock_test_and_set(volatile uint32_t* dest, uint32_t value)
 {
-#if defined(__GNUG__)
-	return __sync_lock_test_and_set(dest, value);
-#else
 	return _InterlockedExchange((volatile long*)dest, value);
-#endif
 }
-static __forceinline uint64_t InterlockedExchange(volatile uint64_t* dest, uint64_t value)
+
+inline uint64_t sync_lock_test_and_set(volatile uint64_t* dest, uint64_t value)
 {
-#if defined(__GNUG__)
-	return __sync_lock_test_and_set(dest, value);
-#else
 	return _InterlockedExchange64((volatile long long*)dest, value);
-#endif
 }
-#endif
 
-#ifndef InterlockedOr
-static __forceinline uint8_t InterlockedOr(volatile uint8_t* dest, uint8_t value)
+// atomic add functions
+
+inline uint8_t sync_fetch_and_add(volatile uint8_t* dest, uint8_t value)
 {
-#if defined(__GNUG__)
-	return __sync_fetch_and_or(dest, value);
-#else
+	return _InterlockedExchangeAdd8((volatile char*)dest, value);
+}
+
+inline uint16_t sync_fetch_and_add(volatile uint16_t* dest, uint16_t value)
+{
+	return _InterlockedExchangeAdd16((volatile short*)dest, value);
+}
+
+inline uint32_t sync_fetch_and_add(volatile uint32_t* dest, uint32_t value)
+{
+	return _InterlockedExchangeAdd((volatile long*)dest, value);
+}
+
+inline uint64_t sync_fetch_and_add(volatile uint64_t* dest, uint64_t value)
+{
+	return _InterlockedExchangeAdd64((volatile long long*)dest, value);
+}
+
+// atomic sub functions
+
+inline uint8_t sync_fetch_and_sub(volatile uint8_t* dest, uint8_t value)
+{
+	return _InterlockedExchangeAdd8((volatile char*)dest, -(char)value);
+}
+
+inline uint16_t sync_fetch_and_sub(volatile uint16_t* dest, uint16_t value)
+{
+	return _InterlockedExchangeAdd16((volatile short*)dest, -(short)value);
+}
+
+inline uint32_t sync_fetch_and_sub(volatile uint32_t* dest, uint32_t value)
+{
+	return _InterlockedExchangeAdd((volatile long*)dest, -(long)value);
+}
+
+inline uint64_t sync_fetch_and_sub(volatile uint64_t* dest, uint64_t value)
+{
+	return _InterlockedExchangeAdd64((volatile long long*)dest, -(long long)value);
+}
+
+// atomic `bitwise or` functions
+
+inline uint8_t sync_fetch_and_or(volatile uint8_t* dest, uint8_t value)
+{
 	return _InterlockedOr8((volatile char*)dest, value);
-#endif
 }
-static __forceinline uint16_t InterlockedOr(volatile uint16_t* dest, uint16_t value)
+
+inline uint16_t sync_fetch_and_or(volatile uint16_t* dest, uint16_t value)
 {
-#if defined(__GNUG__)
-	return __sync_fetch_and_or(dest, value);
-#else
 	return _InterlockedOr16((volatile short*)dest, value);
-#endif
 }
-static __forceinline uint32_t InterlockedOr(volatile uint32_t* dest, uint32_t value)
+
+inline uint32_t sync_fetch_and_or(volatile uint32_t* dest, uint32_t value)
 {
-#if defined(__GNUG__)
-	return __sync_fetch_and_or(dest, value);
-#else
 	return _InterlockedOr((volatile long*)dest, value);
-#endif
 }
-static __forceinline uint64_t InterlockedOr(volatile uint64_t* dest, uint64_t value)
+
+inline uint64_t sync_fetch_and_or(volatile uint64_t* dest, uint64_t value)
 {
-#if defined(__GNUG__)
-	return __sync_fetch_and_or(dest, value);
-#else
 	return _InterlockedOr64((volatile long long*)dest, value);
-#endif
 }
-#endif
 
-#ifndef InterlockedAnd
-static __forceinline uint8_t InterlockedAnd(volatile uint8_t* dest, uint8_t value)
+// atomic `bitwise and` functions
+
+inline uint8_t sync_fetch_and_and(volatile uint8_t* dest, uint8_t value)
 {
-#if defined(__GNUG__)
-	return __sync_fetch_and_and(dest, value);
-#else
 	return _InterlockedAnd8((volatile char*)dest, value);
-#endif
 }
-static __forceinline uint16_t InterlockedAnd(volatile uint16_t* dest, uint16_t value)
+
+inline uint16_t sync_fetch_and_and(volatile uint16_t* dest, uint16_t value)
 {
-#if defined(__GNUG__)
-	return __sync_fetch_and_and(dest, value);
-#else
 	return _InterlockedAnd16((volatile short*)dest, value);
-#endif
 }
-static __forceinline uint32_t InterlockedAnd(volatile uint32_t* dest, uint32_t value)
+
+inline uint32_t sync_fetch_and_and(volatile uint32_t* dest, uint32_t value)
 {
-#if defined(__GNUG__)
-	return __sync_fetch_and_and(dest, value);
-#else
 	return _InterlockedAnd((volatile long*)dest, value);
-#endif
 }
-static __forceinline uint64_t InterlockedAnd(volatile uint64_t* dest, uint64_t value)
+
+inline uint64_t sync_fetch_and_and(volatile uint64_t* dest, uint64_t value)
 {
-#if defined(__GNUG__)
-	return __sync_fetch_and_and(dest, value);
-#else
 	return _InterlockedAnd64((volatile long long*)dest, value);
-#endif
 }
-#endif
 
-#ifndef InterlockedXor
-static __forceinline uint8_t InterlockedXor(volatile uint8_t* dest, uint8_t value)
+// atomic `bitwise xor` functions
+
+inline uint8_t sync_fetch_and_xor(volatile uint8_t* dest, uint8_t value)
 {
-#if defined(__GNUG__)
-	return __sync_fetch_and_xor(dest, value);
-#else
 	return _InterlockedXor8((volatile char*)dest, value);
-#endif
 }
-static __forceinline uint16_t InterlockedXor(volatile uint16_t* dest, uint16_t value)
-{
-#if defined(__GNUG__)
-	return __sync_fetch_and_xor(dest, value);
-#else
-	return _InterlockedXor16((volatile short*)dest, value);
-#endif
-}
-static __forceinline uint32_t InterlockedXor(volatile uint32_t* dest, uint32_t value)
-{
-#if defined(__GNUG__)
-	return __sync_fetch_and_xor(dest, value);
-#else
-	return _InterlockedXor((volatile long*)dest, value);
-#endif
-}
-static __forceinline uint64_t InterlockedXor(volatile uint64_t* dest, uint64_t value)
-{
-#if defined(__GNUG__)
-	return __sync_fetch_and_xor(dest, value);
-#else
-	return _InterlockedXor64((volatile long long*)dest, value);
-#endif
-}
-#endif
 
-static __forceinline uint32_t cntlz32(uint32_t arg)
+inline uint16_t sync_fetch_and_xor(volatile uint16_t* dest, uint16_t value)
+{
+	return _InterlockedXor16((volatile short*)dest, value);
+}
+
+inline uint32_t sync_fetch_and_xor(volatile uint32_t* dest, uint32_t value)
+{
+	return _InterlockedXor((volatile long*)dest, value);
+}
+
+inline uint64_t sync_fetch_and_xor(volatile uint64_t* dest, uint64_t value)
+{
+	return _InterlockedXor64((volatile long long*)dest, value);
+}
+
+#endif /* _MSC_VER */
+
+inline uint32_t cntlz32(uint32_t arg)
 {
 #if defined(_MSC_VER)
 	unsigned long res;
@@ -317,7 +321,7 @@ static __forceinline uint32_t cntlz32(uint32_t arg)
 #endif
 }
 
-static __forceinline uint64_t cntlz64(uint64_t arg)
+inline uint64_t cntlz64(uint64_t arg)
 {
 #if defined(_MSC_VER)
 	unsigned long res;

@@ -1,22 +1,14 @@
 #pragma once
 
-struct HeapInfo
-{
-	const std::string name;
-
-	HeapInfo(const char* name)
-		: name(name)
-	{
-	}
-};
+namespace vm { using namespace ps3; }
 
 using spu_printf_cb_t = vm::ptr<s32(u32 arg)>;
 
 // Aux
-extern spu_printf_cb_t spu_printf_agcb;
-extern spu_printf_cb_t spu_printf_dgcb;
-extern spu_printf_cb_t spu_printf_atcb;
-extern spu_printf_cb_t spu_printf_dtcb;
+extern spu_printf_cb_t g_spu_printf_agcb;
+extern spu_printf_cb_t g_spu_printf_dgcb;
+extern spu_printf_cb_t g_spu_printf_atcb;
+extern spu_printf_cb_t g_spu_printf_dtcb;
 
 // Functions
 vm::ptr<void> _sys_memset(vm::ptr<void> dst, s32 value, u32 size);
@@ -39,3 +31,5 @@ s32 sys_lwcond_signal(PPUThread& CPU, vm::ptr<sys_lwcond_t> lwcond);
 s32 sys_lwcond_signal_all(PPUThread& CPU, vm::ptr<sys_lwcond_t> lwcond);
 s32 sys_lwcond_signal_to(PPUThread& CPU, vm::ptr<sys_lwcond_t> lwcond, u32 ppu_thread_id);
 s32 sys_lwcond_wait(PPUThread& CPU, vm::ptr<sys_lwcond_t> lwcond, u64 timeout);
+
+void sys_ppu_thread_exit(PPUThread& CPU, u64 val);
